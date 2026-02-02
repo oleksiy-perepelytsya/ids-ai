@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  ids:
+    build: .
+    container_name: ids-app
+    env_file:
+      - .env
+    volumes:
+      - ./ids:/app/ids
+      - ./tests:/app/tests
+      - ${PROJECTS_ROOT:-./projects}:/projects
+    depends_on:
+      - mongodb
+      - chromadb
+      - redis
+    restart: unless-stopped
+    command: sh -c "sleep 10 && python -m ids"
+
+  mongodb:
+    image: mongo:7
+    container_name: ids-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db
+    environment:
+      - MONGO_INITDB_DATABASE=ids
+    restart: unless-stopped
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: ids-chromadb
+    ports:
+      - "8000:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: ids-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  mongodb_data:
+  chroma_data:
+  redis_data:

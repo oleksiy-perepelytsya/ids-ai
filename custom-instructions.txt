@@ -1,0 +1,380 @@
+# Custom Instructions for Parliament Core System Project
+
+## Project Context
+
+This project is building Parliament - an autonomous development platform with multi-agent deliberation. It's designed to be a cost-effective alternative to tools like Cursor, operating within a $10/month budget.
+
+## Core Principles
+
+### 1. Error-Driven Development
+- NO mocks in tests - use real services (MongoDB, Redis, Gemini API)
+- Real errors provide perfect context for agent learning
+- Every error should capture rich context automatically
+- Tests validate behavior, not implementation details
+
+### 2. Budget-Aware Architecture
+- Target: $10/month operational cost
+- Gemini 2.0 Flash for 90% of operations (Parliament agents)
+- Claude Sonnet 4 for 10% critical decisions (Generalist agent)
+- Aggressive prompt caching to reduce costs by 75-90%
+
+### 3. Multi-Agent Deliberation
+- 6 Parliament agents (Gemini): Tech Lead, Architect, Coder, SRE, Security, Tester
+- 1 Generalist agent (Claude): High-level architecture, complex decisions
+- Each agent has progressive and critic personas
+- Decisions emerge through debate, not dictation
+
+### 4. Continuous Learning
+- Extract patterns from every successful session
+- Store in ChromaDB for semantic retrieval
+- System improves over time (Month 1: 15 iterations, Month 6: 3 iterations)
+- Knowledge shared across all development sessions
+
+## Technology Stack
+
+### Core
+- Python 3.11+ with async/await
+- FastAPI (optional API)
+- Pydantic for data validation
+
+### AI/LLM
+- google-generativeai ^0.3.0 (Gemini 2.0 Flash)
+- anthropic ^0.18.0 (Claude Sonnet 4)
+
+### Storage
+- ChromaDB ^0.4.22 (vector DB for patterns)
+- MongoDB Atlas with motor ^3.3.2 (sessions, metrics)
+- Redis ^5.0.0 (optional caching)
+
+### File Operations
+- libcst ^1.1.0 (AST manipulation)
+- GitPython ^3.1.40 (version control)
+
+### Code Quality
+- ruff ^0.1.13 (linting)
+- mypy ^1.8.0 (type checking)
+- pytest ^7.4.0 + pytest-asyncio
+
+### CLI
+- typer ^0.9.0 (CLI framework)
+- rich ^13.7.0 (terminal UI)
+
+## Code Generation Guidelines
+
+### When generating code for this project:
+
+1. **Always use async/await patterns**
+   ```python
+   async def handle_error(error_ctx: ErrorContext):
+       result = await agent.fix_error(error_ctx)
+       return result
+   ```
+
+2. **Include comprehensive type hints**
+   ```python
+   async def create_session(task: str) -> DevSession:
+       session = DevSession(task=task, status="pending")
+       return session
+   ```
+
+3. **Use Pydantic models for data structures**
+   ```python
+   class ErrorContext(BaseModel):
+       error_type: str
+       error_message: str
+       stack_trace: str
+       reproduction_steps: str
+   ```
+
+4. **Add docstrings with examples**
+   ```python
+   async def capture_error(exc: Exception) -> ErrorContext:
+       """
+       Capture rich error context for agent analysis.
+       
+       Args:
+           exc: The exception that occurred
+           
+       Returns:
+           ErrorContext with full details for fixing
+           
+       Example:
+           >>> try:
+           >>>     result = await risky_operation()
+           >>> except Exception as e:
+           >>>     context = await capture_error(e)
+           >>>     await send_to_parliament(context)
+       """
+   ```
+
+5. **Follow error-driven testing philosophy**
+   ```python
+   # ✓ Good: Real integration test
+   async def test_vessel_evaluation():
+       """Test with real Telegram bot, real MongoDB, real Gemini"""
+       response = await bot.send_message(TEST_CHAT, "/evaluate vessel:123")
+       assert "Score:" in response.text
+   
+   # ✗ Bad: Mock-based test
+   @patch('telegram.Bot')
+   @patch('mongodb.Collection')
+   async def test_vessel_evaluation(mock_bot, mock_db):
+       """Don't do this - use real services"""
+   ```
+
+6. **Implement validation gates, not unit tests**
+   ```python
+   class ValidationGate:
+       async def validate(self, changes: Dict) -> bool:
+           # Syntax check
+           if not await self.syntax_check(changes):
+               return False
+           
+           # Contract tests (public interfaces only)
+           if not await self.contract_tests():
+               return False
+           
+           # Smoke tests (critical paths)
+           if not await self.smoke_tests():
+               return False
+           
+           return True
+   ```
+
+7. **Build for budget awareness**
+   ```python
+   class BudgetController:
+       async def should_use_claude(self, task: Dict) -> bool:
+           """Route expensive tasks to Claude only when necessary"""
+           if self.monthly_spent > 0.8 * self.monthly_budget:
+               return False  # Use Gemini to save budget
+           
+           return task['priority'] == 'critical'
+   ```
+
+8. **Capture errors with full context**
+   ```python
+   async def handle_request(update: Dict):
+       context = {
+           'user_input': update['text'],
+           'telegram_update': update,
+           'expected_behavior': 'Return evaluation'
+       }
+       
+       try:
+           result = await process(update)
+       except Exception as e:
+           error_ctx = error_capture.capture_exception(e, context)
+           await parliament.fix_error(error_ctx)
+   ```
+
+## Project Structure
+
+```
+parliament/
+├── cli/                    # Command-line interface
+├── orchestrator/          # Session management, routing, budget
+├── agents/                # Parliament agents + Generalist
+├── services/              # File ops, validation, git, memory
+├── storage/               # ChromaDB, MongoDB interfaces
+├── validation/            # Error handling, validation gates
+├── config/                # Settings, prompts
+├── models/                # Pydantic models
+└── utils/                 # Helpers
+```
+
+## Test Case: Maritime Broker System
+
+The primary test case is a maritime broker application:
+- Telegram bot for user interaction
+- MongoDB for vessel/cargo data
+- Redis caching
+- Gemini 2.0 Flash for evaluations
+- FastAPI backend
+- Docker containerized
+
+This serves as both a real production application and a test bed for Parliament.
+
+## Design Patterns to Follow
+
+### 1. Service Pattern
+```python
+class ServiceName:
+    """
+    Service for specific responsibility
+    Single responsibility principle
+    """
+    
+    def __init__(self, dependencies):
+        self.dep = dependencies
+    
+    async def public_method(self):
+        """Public API"""
+        
+    def _private_helper(self):
+        """Internal helper"""
+```
+
+### 2. Agent Pattern
+```python
+class AgentName(BaseAgent):
+    """Specialized agent with dual personas"""
+    
+    role = "specific_role"
+    
+    progressive_traits = [
+        "Proposes innovative solutions",
+        "Advocates for best practices"
+    ]
+    
+    critic_traits = [
+        "Questions assumptions",
+        "Identifies edge cases"
+    ]
+    
+    async def analyze(self, task: Dict) -> Dict:
+        """Agent-specific analysis"""
+```
+
+### 3. Validation Gate Pattern
+```python
+class SpecificGate:
+    """Validation gate with clear pass/fail"""
+    
+    def applies_to(self, changes: Dict) -> bool:
+        """Should this gate run?"""
+        
+    async def validate(self, changes: Dict) -> ValidationResult:
+        """Validate and return clear result"""
+```
+
+## What NOT to Do
+
+1. **Don't use mocks** - Use real services with test credentials
+2. **Don't write unit tests for everything** - Use contract tests for public interfaces only
+3. **Don't over-engineer** - Start simple, add complexity only when needed
+4. **Don't ignore budget** - Always consider cost implications
+5. **Don't use synchronous code** - Always async/await
+6. **Don't skip docstrings** - Every public function needs documentation
+7. **Don't hardcode** - Use Pydantic settings with env vars
+
+## Current Development Phase
+
+**Status:** Architecture complete, implementation in progress
+
+**Next priorities:**
+1. Core services (FileManager, ErrorCapture, CodebaseManager)
+2. LLM client (unified Gemini + Claude interface)
+3. Base agent implementation
+4. Simple orchestrator (basic session flow)
+5. CLI (minimal working interface)
+
+## Response Style Preferences
+
+When working on this project:
+- Start with high-level design before diving into code
+- Generate complete, production-ready code (not sketches)
+- Include error handling from the start
+- Add type hints and docstrings
+- Consider budget implications
+- Think about how agents will use/understand the code
+- Explain architectural decisions
+- Use structured logging
+- Follow Python best practices (PEP 8, type hints, async)
+
+## Example Usage
+
+```python
+# Good code example for this project:
+
+from typing import Dict, Optional
+from pydantic import BaseModel
+import structlog
+
+logger = structlog.get_logger()
+
+class ErrorContext(BaseModel):
+    """Rich error context for agent consumption"""
+    error_type: str
+    error_message: str
+    stack_trace: str
+    reproduction_steps: str
+
+class ErrorCapture:
+    """
+    Automatic error capture with rich context.
+    Replaces need for manual bug reports.
+    
+    Example:
+        >>> capture = ErrorCapture(project_root="/app")
+        >>> try:
+        >>>     await risky_operation()
+        >>> except Exception as e:
+        >>>     context = capture.capture_exception(e, user_context)
+        >>>     await parliament.fix_error(context)
+    """
+    
+    def __init__(self, project_root: str):
+        self.project_root = Path(project_root)
+        self.recent_logs = []
+        
+    def capture_exception(
+        self,
+        exc: Exception,
+        context: Optional[Dict] = None
+    ) -> ErrorContext:
+        """
+        Capture everything needed for agent to fix the error.
+        
+        Args:
+            exc: The exception that occurred
+            context: Additional context (user input, state, etc.)
+            
+        Returns:
+            ErrorContext with complete information for fixing
+        """
+        logger.info(
+            "capturing_error",
+            error_type=type(exc).__name__,
+            has_context=context is not None
+        )
+        
+        # Implementation...
+        return ErrorContext(
+            error_type=type(exc).__name__,
+            error_message=str(exc),
+            stack_trace=traceback.format_exc(),
+            reproduction_steps=self._build_reproduction(context)
+        )
+```
+
+This code exemplifies:
+- Type hints everywhere
+- Pydantic models for structure
+- Docstrings with examples
+- Structured logging
+- Async where needed
+- Error-driven philosophy
+- Budget consciousness (efficient capture)
+
+## Questions to Ask
+
+When unclear about requirements:
+1. "Should this use Gemini or Claude?" (consider budget)
+2. "What's the error capture strategy here?"
+3. "How will agents interact with this?"
+4. "What validation gates apply?"
+5. "Is this a contract test or smoke test scenario?"
+
+## Success Metrics
+
+Code for this project should optimize for:
+1. **Cost efficiency** - Minimize LLM token usage
+2. **Agent comprehension** - Agents should understand errors easily
+3. **Learning velocity** - System should improve over time
+4. **Iteration speed** - Fast feedback loops
+5. **Production reliability** - Real integration testing catches issues
+
+---
+
+Remember: This system is designed to be self-improving. Every piece of code should consider "how will the agents learn from this?"
