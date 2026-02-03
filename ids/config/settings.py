@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(..., description="Google Gemini API key")
     anthropic_api_key: str = Field(..., description="Anthropic Claude API key")
     
+    # LLM Model Configuration
+    gemini_model: str = Field(default="gemini-2.0-flash", description="Gemini model name")
+    claude_model: str = Field(default="claude-sonnet-4-20250514", description="Claude model name")
+    
     # Storage Configuration
     mongodb_uri: str = Field(default="mongodb://localhost:27017")
     mongodb_db: str = Field(default="ids")

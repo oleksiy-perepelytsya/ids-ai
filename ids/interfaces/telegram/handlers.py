@@ -64,6 +64,7 @@ class TelegramHandlers:
             "*Session Commands:*\n"
             "/status \\- Current session info\n"
             "/history \\- Past sessions\n"
+            "/export \\- Export full conversation\n"
             "/cancel \\- Cancel current session\n"
             "/settings \\- Toggle round logging\n"
             "\n"
@@ -525,4 +526,98 @@ class TelegramHandlers:
             "⚠️ Lint: 2 warnings\n\n"
             "Ready to commit!",
             parse_mode=ParseMode.MARKDOWN
+        )
+    
+    async def cmd_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /export command to export full conversation.
+        
+        Usage: /export <session_number>
+        Example: /export 3 (exports 3rd most recent session)
+        """
+        user_id = update.effective_user.id
+        
+        # Get session number from command
+        text = update.message.text
+        parts = text.split()
+        
+        if len(parts) < 2:
+            await update.message.reply_text(
+                "📝 Usage: /export <session_number>\n\n"
+                "Example: /export 1 (most recent)\n"
+                "        /export 3 (3rd most recent)\n\n"
+                "Tip: Use /history to see your sessions"
+            )
+            return
+        
+        try:
+            session_num = int(parts[1])
+        except ValueError:
+            await update.message.reply_text("❌ Invalid session number")
+            return
+        
+        # Get user's sessions
+        sessions = await self.session_manager.session_store.get_user_sessions(
+            user_id, limit=10
+        )
+        
+        if not sessions:
+            await update.message.reply_text("No sessions found")
+            return
+        
+        if session_num < 1 or session_num > len(sessions):
+            await update.message.reply_text(
+                f"❌ Session number must be between 1 and {len(sessions)}"
+            )
+            return
+        
+        # Get the session (1-indexed from user's perspective)
+        session = sessions[session_num - 1]
+        
+        # Export to markdown
+        from ids.utils.conversation_export import ConversationExporter
+        
+        markdown_export = ConversationExporter.export_to_markdown(session)
+        
+        # Split into chunks if too long (Telegram limit 4096)
+        max_length = 4000
+        if len(markdown_export) <= max_length:
+            await update.message.reply_text(
+                markdown_export,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        else:
+            # Send in chunks
+            chunks = []
+            current = []
+            current_length = 0
+            
+            for line in markdown_export.split('\n'):
+                line_length = len(line) + 1  # +1 for newline
+                if current_length + line_length > max_length:
+                    chunks.append('\n'.join(current))
+                    current = [line]
+                    current_length = line_length
+                else:
+                    current.append(line)
+                    current_length += line_length
+            
+            if current:
+                chunks.append('\n'.join(current))
+            
+            # Send first chunk
+            await update.message.reply_text(
+                f"📄 Conversation Export (Part 1/{len(chunks)})\n\n" + chunks[0]
+            )
+            
+            # Send remaining chunks
+            for i, chunk in enumerate(chunks[1:], start=2):
+                await update.message.reply_text(
+                    f"📄 Part {i}/{len(chunks)}\n\n" + chunk
+                )
+        
+        await update.message.reply_text(
+            f"✅ Exported session {session_num}\n"
+            f"Total rounds: {len(session.rounds)}\n"
+            f"Status: {session.status.value}"
         )

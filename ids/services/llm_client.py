@@ -15,12 +15,14 @@ class LLMClient:
     def __init__(self):
         # Configure Gemini
         genai.configure(api_key=settings.gemini_api_key)
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+        # Use configurable model name from settings
+        self.gemini_model = genai.GenerativeModel(settings.gemini_model)
         
         # Configure Claude (Anthropic client)
         self.anthropic = Anthropic(
             api_key=settings.anthropic_api_key
         )
+        self.claude_model = settings.claude_model
         
         logger.info("llm_client_initialized")
     
@@ -82,7 +84,7 @@ class LLMClient:
         """
         try:
             message_params = {
-                "model": "claude-sonnet-4-20250514",
+                "model": self.claude_model,
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "messages": [

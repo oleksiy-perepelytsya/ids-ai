@@ -81,13 +81,13 @@ class Agent:
             response_text = await self.llm_client.call_claude(
                 prompt=prompt,
                 system_prompt=self.persona["system_prompt"],
-                temperature=0.7
+                temperature=0.2
             )
         else:
             response_text = await self.llm_client.call_gemini(
                 prompt=prompt,
                 system_prompt=self.persona["system_prompt"],
-                temperature=0.7
+                temperature=0.2
             )
         
         # Parse response

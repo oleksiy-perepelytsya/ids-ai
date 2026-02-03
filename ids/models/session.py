@@ -23,10 +23,21 @@ class SessionStatus(str, Enum):
 class RoundResult(BaseModel):
     """Results from a single deliberation round"""
     round_number: int = Field(description="Round number (1-indexed)")
+    
+    # Generalist's input to this round
+    generalist_prompt: str = Field(description="Prompt sent by generalist to parliament")
     generalist_cross: CrossScore = Field(description="Generalist's initial CROSS score")
+    
+    # Parliament member responses
     agent_responses: List[AgentResponse] = Field(description="All agent responses")
+    
+    # Aggregated results
     merged_cross: MergedCross = Field(description="Merged CROSS from all agents")
     decision: DecisionResult = Field(description="Round outcome decision")
+    
+    # Decision reasoning
+    decision_reasoning: str = Field(default="", description="Why this decision was made")
+    
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:

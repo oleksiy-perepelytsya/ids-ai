@@ -21,9 +21,15 @@ class AgentRole(str, Enum):
 class AgentResponse(BaseModel):
     """Response from a single agent during deliberation round"""
     agent_id: AgentRole = Field(description="Agent role identifier")
+    
+    # Full LLM response
+    raw_response: str = Field(description="Complete response from LLM before parsing")
+    
+    # Parsed components
     cross_score: CrossScore = Field(description="CROSS scoring")
     proposed_approach: str = Field(description="Detailed solution proposal")
     concerns: List[str] = Field(default_factory=list, description="Specific concerns identified")
+    
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     
     class Config:

@@ -6,33 +6,33 @@ consensus:
   # Confidence thresholds by round
   # Higher = more confident agents must be
   confidence_threshold:
-    round_1: 85.0  # Very strict initially
-    round_2: 75.0  # Moderate after debate
-    round_3: 70.0  # More lenient before user feedback
+    round_1: 60.0  # Very strict initially
+    round_2: 50.0  # Moderate after debate
+    round_3: 40.0  # More lenient before user feedback
   
   # Maximum acceptable risk by round
   # Lower = more risk-averse
   max_acceptable_risk:
-    round_1: 20.0  # Very cautious initially
-    round_2: 30.0  # Moderate risk acceptable
+    round_1: 60.0  # Very cautious initially
+    round_2: 50.0  # Moderate risk acceptable
     round_3: 40.0  # Higher risk ok if needed
   
   # Minimum expected outcome by round
   # Higher = expecting better results
   min_outcome_score:
-    round_1: 80.0  # Expect excellent outcome
-    round_2: 70.0  # Good outcome acceptable
-    round_3: 60.0  # Decent outcome ok
+    round_1: 60.0  # Expect excellent outcome
+    round_2: 50.0  # Good outcome acceptable
+    round_3: 40.0  # Decent outcome ok
   
   # Agreement thresholds (standard deviation)
   # Lower = agents must agree more closely
-  max_confidence_std: 15.0  # Max divergence in confidence
-  max_outcome_std: 15.0     # Max divergence in expected outcome
+  max_confidence_std: 20.0  # Max divergence in confidence
+  max_outcome_std: 20.0     # Max divergence in expected outcome
 
 # Dead-end detection patterns
 dead_end:
   # Confidence decreasing threshold
-  confidence_decline_threshold: 10.0  # If confidence drops >10% between rounds
+  confidence_decline_threshold: 20.0  # If confidence drops >10% between rounds
   
   # Circular debate detection
   similarity_threshold: 0.85  # If rounds are >85% similar, likely circular

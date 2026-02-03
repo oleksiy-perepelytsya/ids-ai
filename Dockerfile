@@ -15,8 +15,6 @@ ENV PATH="/root/.local/bin:$PATH"
 # Copy dependency files
 COPY pyproject.toml ./
 
-ENV POETRY_HTTP_TIMEOUT=500
-
 # Install dependencies
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
