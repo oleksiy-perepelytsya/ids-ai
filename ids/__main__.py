@@ -59,7 +59,9 @@ async def main():
             "ids_ready",
             allowed_users=len(settings.get_allowed_users()),
             max_rounds=settings.max_rounds,
-            round_logging=settings.round_logging
+            round_logging=settings.round_logging,
+            agent_execution_mode="parallel" if settings.parallel_agents else "sequential",
+            agent_delay_seconds=settings.agent_delay_seconds
         )
         
         # Run polling

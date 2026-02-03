@@ -79,22 +79,28 @@ class RoundExecutor:
             agent_responses
         )
         
-        # Step 4: Create round result
+        # Step 4: Build the generalist prompt that was used
+        generalist_prompt = self._build_generalist_prompt_summary(session, round_num)
+        
+        # Step 5: Create round result with all required fields
         round_result = RoundResult(
             round_number=round_num,
+            generalist_prompt=generalist_prompt,
             generalist_cross=generalist_cross,
             agent_responses=agent_responses,
             merged_cross=merged_cross,
-            decision=DecisionResult.CONTINUE  # Will be determined by consensus builder
+            decision=DecisionResult.CONTINUE,  # Will be determined by consensus builder
+            decision_reasoning=""  # Will be filled by consensus builder
         )
         
-        # Step 5: Evaluate and determine decision
-        decision = self.consensus_builder.evaluate_round(
+        # Step 6: Evaluate and determine decision with reasoning
+        decision, reasoning = self.consensus_builder.evaluate_round(
             round_result,
             round_num,
             session
         )
         round_result.decision = decision
+        round_result.decision_reasoning = reasoning
         
         logger.info(
             "round_complete",
@@ -132,7 +138,7 @@ class RoundExecutor:
         round_num: int,
         generalist_cross: CrossScore
     ) -> List[AgentResponse]:
-        """Get responses from all specialized agents in parallel"""
+        """Get responses from all specialized agents in parallel or sequential"""
         
         specialized_roles = [
             AgentRole.DEVELOPER_PROGRESSIVE,
@@ -146,9 +152,43 @@ class RoundExecutor:
         # Prepare previous rounds data
         previous_rounds = self._prepare_round_history(session)
         
+        # Import settings to check execution mode
+        from ids.config import settings
+        
+        # Delay after Generalist before first specialized agent (both hit APIs)
+        await asyncio.sleep(settings.agent_delay_seconds)
+        
+        if settings.parallel_agents:
+            # PARALLEL MODE (requires higher API quota)
+            logger.info("executing_agents_parallel", count=len(specialized_roles))
+            return await self._execute_parallel(
+                specialized_roles, 
+                session, 
+                previous_rounds, 
+                generalist_cross
+            )
+        else:
+            # SEQUENTIAL MODE (avoids rate limits)
+            logger.info("executing_agents_sequential", count=len(specialized_roles))
+            return await self._execute_sequential(
+                specialized_roles,
+                session,
+                previous_rounds,
+                generalist_cross
+            )
+    
+    async def _execute_parallel(
+        self,
+        roles: List[AgentRole],
+        session: DevSession,
+        previous_rounds: List[dict],
+        generalist_cross: CrossScore
+    ) -> List[AgentResponse]:
+        """Execute all agents in parallel (fast but needs high quota)"""
+        
         # Create tasks for all agents
         tasks = []
-        for role in specialized_roles:
+        for role in roles:
             agent = self.agents[role]
             task = agent.analyze(
                 task=session.task,
@@ -167,13 +207,65 @@ class RoundExecutor:
             if isinstance(response, Exception):
                 logger.error(
                     "agent_analysis_failed",
-                    role=specialized_roles[i],
+                    role=roles[i],
                     error=str(response)
                 )
             else:
                 valid_responses.append(response)
         
         return valid_responses
+    
+    async def _execute_sequential(
+        self,
+        roles: List[AgentRole],
+        session: DevSession,
+        previous_rounds: List[dict],
+        generalist_cross: CrossScore
+    ) -> List[AgentResponse]:
+        """Execute agents one by one (slower but avoids rate limits)"""
+        from ids.config import settings
+        
+        responses = []
+        
+        for i, role in enumerate(roles, 1):
+            try:
+                logger.info(
+                    "executing_agent",
+                    role=role,
+                    progress=f"{i}/{len(roles)}"
+                )
+                
+                agent = self.agents[role]
+                response = await agent.analyze(
+                    task=session.task,
+                    context=session.context,
+                    previous_rounds=previous_rounds,
+                    generalist_cross=generalist_cross
+                )
+                
+                responses.append(response)
+                
+                logger.info(
+                    "agent_complete",
+                    role=role,
+                    confidence=response.cross_score.confidence
+                )
+                
+                # Delay between calls to avoid rate limits (except after last agent)
+                if i < len(roles):
+                    delay = settings.agent_delay_seconds
+                    logger.debug("rate_limit_delay", seconds=delay)
+                    await asyncio.sleep(delay)
+                    
+            except Exception as e:
+                logger.error(
+                    "agent_analysis_failed",
+                    role=role,
+                    error=str(e)
+                )
+                # Continue with other agents even if one fails
+        
+        return responses
     
     def _prepare_round_history(self, session: DevSession) -> List[dict]:
         """Prepare previous rounds data for agents"""
@@ -199,3 +291,20 @@ class RoundExecutor:
             history.append(round_data)
         
         return history
+
+    def _build_generalist_prompt_summary(self, session: DevSession, round_num: int) -> str:
+        """Build a summary of what was asked in this round"""
+        parts = [f"Round {round_num} Analysis Request:"]
+        parts.append(f"Task: {session.task}")
+        
+        if session.context:
+            parts.append(f"Context: {session.context}")
+        
+        if len(session.rounds) > 0:
+            parts.append(f"Previous rounds: {len(session.rounds)}")
+            parts.append("Building on previous deliberation to reach consensus.")
+        else:
+            parts.append("Initial analysis of this task.")
+        
+        return "\n".join(parts)
+

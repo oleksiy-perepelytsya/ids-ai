@@ -1,7 +1,7 @@
 """Application settings and configuration"""
 
 from typing import List, Optional
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,6 +38,13 @@ class Settings(BaseSettings):
     max_rounds: int = Field(default=3, description="Maximum deliberation rounds")
     max_iterations: int = Field(default=10, description="Maximum implementation iterations")
     
+    # Agent Execution Configuration
+    # PARALLEL_AGENTS=false (default) = sequential, avoids rate limits
+    # SEQUENTIAL_AGENTS=true = alternative way to force sequential (overrides PARALLEL_AGENTS)
+    parallel_agents: bool = Field(default=False, description="Execute agents in parallel (requires higher API quota)")
+    sequential_agents: Optional[bool] = Field(default=None, description="If true, force sequential execution (overrides PARALLEL_AGENTS)")
+    agent_delay_seconds: float = Field(default=2.0, description="Delay between sequential agent calls to avoid rate limits")
+    
     # Projects
     projects_root: str = Field(default="/projects", description="Root path for projects")
     default_project: str = Field(default="general", description="Default project context")
@@ -46,10 +53,17 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
     log_format: str = Field(default="json")
     
+    @model_validator(mode="after")
+    def apply_sequential_override(self) -> "Settings":
+        """If SEQUENTIAL_AGENTS=true, force parallel_agents to False (avoids rate limits)"""
+        if self.sequential_agents is True:
+            object.__setattr__(self, "parallel_agents", False)
+        return self
+
     def get_allowed_users(self) -> List[int]:
         """Parse allowed Telegram user IDs"""
         return [int(uid.strip()) for uid in self.allowed_telegram_users.split(",")]
-    
+
     @property
     def chromadb_url(self) -> str:
         """ChromaDB HTTP URL"""
