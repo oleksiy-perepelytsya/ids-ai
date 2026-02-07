@@ -26,7 +26,8 @@ class RoundResult(BaseModel):
     
     # Generalist's input to this round
     generalist_prompt: str = Field(description="Prompt sent by generalist to parliament")
-    generalist_cross: CrossScore = Field(description="Generalist's initial CROSS score")
+    generalist_response: AgentResponse = Field(description="Generalist's full response")
+    generalist_cross: CrossScore = Field(description="Generalist's initial CROSS score (duplicated from response)")
     
     # Parliament member responses
     agent_responses: List[AgentResponse] = Field(description="All agent responses")

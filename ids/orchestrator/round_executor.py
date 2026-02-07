@@ -86,6 +86,7 @@ class RoundExecutor:
         round_result = RoundResult(
             round_number=round_num,
             generalist_prompt=generalist_prompt,
+            generalist_response=generalist_response,
             generalist_cross=generalist_cross,
             agent_responses=agent_responses,
             merged_cross=merged_cross,

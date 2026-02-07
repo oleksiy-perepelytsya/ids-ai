@@ -1,5 +1,6 @@
 """Unified LLM client for Gemini and Claude APIs"""
 
+import asyncio
 import google.generativeai as genai
 from anthropic import Anthropic
 from typing import Dict, Any

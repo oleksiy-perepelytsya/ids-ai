@@ -530,94 +530,96 @@ class TelegramHandlers:
     
     async def cmd_export(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
-        Handle /export command to export full conversation.
+        Handle /export command to export full conversation as JSON.
         
-        Usage: /export <session_number>
-        Example: /export 3 (exports 3rd most recent session)
+        Usage: 
+            /export             - Export current active session
+            /export <number>    - Export specific past session
         """
         user_id = update.effective_user.id
         
-        # Get session number from command
+        # Determine which session to export
+        session = None
+        session_num = None
+        
+        # Check command arguments
         text = update.message.text
         parts = text.split()
         
-        if len(parts) < 2:
-            await update.message.reply_text(
-                "📝 Usage: /export <session_number>\n\n"
-                "Example: /export 1 (most recent)\n"
-                "        /export 3 (3rd most recent)\n\n"
-                "Tip: Use /history to see your sessions"
-            )
-            return
+        if len(parts) > 1:
+            # Argument provided: try to parse as session number
+            try:
+                session_num = int(parts[1])
+                
+                # Get user's sessions to find by index
+                sessions = await self.session_manager.session_store.get_user_sessions(
+                    user_id, limit=20
+                )
+                
+                if not sessions:
+                    await update.message.reply_text("No past sessions found.")
+                    return
+                
+                if session_num < 1 or session_num > len(sessions):
+                    await update.message.reply_text(
+                        f"❌ Session number must be between 1 and {len(sessions)}"
+                    )
+                    return
+                
+                # Get the session (1-indexed from user's perspective)
+                session = sessions[session_num - 1]
+                
+            except ValueError:
+                await update.message.reply_text("❌ valid session number required (e.g. /export 1)")
+                return
+        else:
+            # No argument: try to get active session
+            session = await self.session_manager.session_store.get_active_session(user_id)
+            if not session:
+                # Fallback to most recent session if no active one
+                sessions = await self.session_manager.session_store.get_user_sessions(
+                    user_id, limit=1
+                )
+                if sessions:
+                    session = sessions[0]
+                    session_num = 1
+                else:
+                    await update.message.reply_text(
+                        "No specific session request and no active/recent session found.\n"
+                        "Use /history to see past sessions."
+                    )
+                    return
+        
+        # We have a session, export it
+        await update.message.reply_text(f"📦 Exporting session {session.session_id}...")
         
         try:
-            session_num = int(parts[1])
-        except ValueError:
-            await update.message.reply_text("❌ Invalid session number")
-            return
-        
-        # Get user's sessions
-        sessions = await self.session_manager.session_store.get_user_sessions(
-            user_id, limit=10
-        )
-        
-        if not sessions:
-            await update.message.reply_text("No sessions found")
-            return
-        
-        if session_num < 1 or session_num > len(sessions):
-            await update.message.reply_text(
-                f"❌ Session number must be between 1 and {len(sessions)}"
-            )
-            return
-        
-        # Get the session (1-indexed from user's perspective)
-        session = sessions[session_num - 1]
-        
-        # Export to markdown
-        from ids.utils.conversation_export import ConversationExporter
-        
-        markdown_export = ConversationExporter.export_to_markdown(session)
-        
-        # Split into chunks if too long (Telegram limit 4096)
-        max_length = 4000
-        if len(markdown_export) <= max_length:
-            await update.message.reply_text(
-                markdown_export,
-                parse_mode=ParseMode.MARKDOWN
-            )
-        else:
-            # Send in chunks
-            chunks = []
-            current = []
-            current_length = 0
+            import json
+            import os
             
-            for line in markdown_export.split('\n'):
-                line_length = len(line) + 1  # +1 for newline
-                if current_length + line_length > max_length:
-                    chunks.append('\n'.join(current))
-                    current = [line]
-                    current_length = line_length
-                else:
-                    current.append(line)
-                    current_length += line_length
+            # Create temporary file
+            filename = f"session_{session.session_id}.json"
             
-            if current:
-                chunks.append('\n'.join(current))
+            # Using Pydantic's correct dump method
+            json_str = session.model_dump_json(indent=2)
             
-            # Send first chunk
-            await update.message.reply_text(
-                f"📄 Conversation Export (Part 1/{len(chunks)})\n\n" + chunks[0]
-            )
+            # Write to file
+            with open(filename, 'w') as f:
+                f.write(json_str)
             
-            # Send remaining chunks
-            for i, chunk in enumerate(chunks[1:], start=2):
-                await update.message.reply_text(
-                    f"📄 Part {i}/{len(chunks)}\n\n" + chunk
+            # Send file (open in binary mode, let Telegram handle closing)
+            with open(filename, 'rb') as f:
+                await update.message.reply_document(
+                    document=f,
+                    filename=filename,
+                    caption=f"📊 Session Export: {session.session_id}\nStatus: {session.status.value}"
                 )
-        
-        await update.message.reply_text(
-            f"✅ Exported session {session_num}\n"
-            f"Total rounds: {len(session.rounds)}\n"
-            f"Status: {session.status.value}"
-        )
+            
+            # Cleanup
+            os.remove(filename)
+            
+            logger.info("session_exported", session_id=session.session_id, user_id=user_id)
+            
+        except Exception as e:
+            logger.error("export_failed", error=str(e), session_id=session.session_id if session else "unknown")
+            await update.message.reply_text(f"❌ Export failed: {str(e)}")
