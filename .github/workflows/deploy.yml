@@ -17,6 +17,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up .env
+        run: cp dotenv_example .env
+
       - name: Build Docker image
         run: docker compose build
 
@@ -44,7 +47,6 @@ jobs:
           script: |
             cd /home/oleksiy_perepelytsya/ids-ai
             git pull origin master
-            cp dotenv_example .env
             docker compose build
             docker compose up -d
             docker image prune -af
