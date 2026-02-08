@@ -1,5 +1,6 @@
 """Unified LLM client for Gemini and Claude APIs"""
 
+import asyncio
 import google.generativeai as genai
 from anthropic import Anthropic
 from typing import Dict, Any
@@ -49,12 +50,18 @@ class LLMClient:
             if system_prompt:
                 full_prompt = f"{system_prompt}\n\n{prompt}"
             
-            response = self.gemini_model.generate_content(
-                full_prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=temperature
+            # Run blocking call in executor
+            loop = asyncio.get_running_loop()
+            
+            def _call_gemini_sync():
+                return self.gemini_model.generate_content(
+                    full_prompt,
+                    generation_config=genai.types.GenerationConfig(
+                        temperature=temperature
+                    )
                 )
-            )
+            
+            response = await loop.run_in_executor(None, _call_gemini_sync)
             
             logger.info("gemini_call_success")
             return response.text

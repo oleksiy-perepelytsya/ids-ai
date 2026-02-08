@@ -41,7 +41,7 @@ class ConsensusBuilder:
         round_result: RoundResult,
         round_num: int,
         session: DevSession
-    ) -> DecisionResult:
+    ) -> tuple[DecisionResult, str]:
         """
         Evaluate a deliberation round and determine outcome.
         
@@ -51,7 +51,7 @@ class ConsensusBuilder:
             session: Full session for dead-end detection
             
         Returns:
-            DecisionResult: CONSENSUS, CONTINUE, or DEAD_END
+            Tuple of (DecisionResult, reasoning_string)
         """
         merged = round_result.merged_cross
         
@@ -65,17 +65,37 @@ class ConsensusBuilder:
         
         # Check if consensus is reached
         if self._check_consensus(merged, round_num):
+            reasoning = (
+                f"Consensus reached in round {round_num}. "
+                f"Confidence: {merged.avg_confidence:.1f}, "
+                f"Risk: {merged.max_risk:.1f}, "
+                f"Outcome: {merged.avg_outcome:.1f}. "
+                f"All thresholds met with good agreement (std_conf: {merged.std_confidence:.1f}, "
+                f"std_outcome: {merged.std_outcome:.1f})."
+            )
             logger.info("consensus_reached", round_num=round_num)
-            return DecisionResult.CONSENSUS
+            return DecisionResult.CONSENSUS, reasoning
         
         # Check if dead-end
         if self._detect_dead_end(session, round_num):
+            reasoning = (
+                f"Dead-end detected after {round_num} round(s). "
+                f"Unable to reach consensus. Confidence: {merged.avg_confidence:.1f}, "
+                f"Risk: {merged.max_risk:.1f}. Need user guidance to proceed."
+            )
             logger.info("dead_end_detected", round_num=round_num)
-            return DecisionResult.DEAD_END
+            return DecisionResult.DEAD_END, reasoning
         
         # Continue to next round
+        reasoning = (
+            f"Continuing to round {round_num + 1}. "
+            f"Confidence: {merged.avg_confidence:.1f}, "
+            f"Risk: {merged.max_risk:.1f}, "
+            f"Outcome: {merged.avg_outcome:.1f}. "
+            f"Making progress but not yet meeting all consensus criteria."
+        )
         logger.info("continuing_deliberation", round_num=round_num)
-        return DecisionResult.CONTINUE
+        return DecisionResult.CONTINUE, reasoning
     
     def _check_consensus(self, merged: MergedCross, round_num: int) -> bool:
         """
