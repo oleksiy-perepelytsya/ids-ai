@@ -44,6 +44,7 @@ jobs:
           script: |
             cd /home/oleksiy_perepelytsya/ids-ai
             git pull origin master
+            cp dotenv_example .env
             docker compose build
             docker compose up -d
             docker image prune -af
