@@ -17,6 +17,9 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Set up .env
+        run: cp dotenv_example .env
+
       - name: Build Docker image
         run: docker compose build
 

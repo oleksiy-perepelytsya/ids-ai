@@ -1,0 +1,38 @@
+# Telegram Bot Configuration
+TELEGRAM_BOT_TOKEN=
+
+# Whitelist (comma-separated Telegram user IDs)
+ALLOWED_TELEGRAM_USERS=78634164
+
+# LLM API Keys
+GEMINI_API_KEY=
+ANTHROPIC_API_KEY=
+
+# Storage Configuration
+MONGODB_URI=mongodb://mongodb:27017
+MONGODB_DB=ids
+CHROMADB_HOST=chromadb
+CHROMADB_PORT=8000
+REDIS_URL=redis://redis:6379
+
+# Behavior Configuration
+ROUND_LOGGING=true
+MAX_ROUNDS=3
+MAX_ITERATIONS=10
+
+# Agent Execution Mode
+# Set to false for sequential (avoids rate limits, slower)
+# Set to true for parallel (faster but needs higher API quota)
+PARALLEL_AGENTS=false
+SEQUENTIAL_AGENTS=true
+AGENT_DELAY_SECONDS=2.0
+
+# Projects Root (where user projects are located)
+PROJECTS_ROOT=/projects
+
+# Logging
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+
+# Default Project Context
+DEFAULT_PROJECT=general
