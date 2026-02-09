@@ -2,6 +2,9 @@ version: '3.8'
 
 services:
   ids:
+    # Use pre-built image from GitHub Container Registry
+    # Falls back to building locally if image not available
+    image: ghcr.io/${GITHUB_REPOSITORY:-oleksiy-perepelytsya/ids-ai}:${IMAGE_TAG:-latest}
     build: .
     container_name: ids-app
     env_file:

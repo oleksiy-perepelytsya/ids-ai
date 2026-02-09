@@ -328,6 +328,90 @@ docker system df
 
 ---
 
+## CI/CD Deployment (VPS with Pre-built Containers)
+
+For small VPS instances that can't build Docker images locally, use this automated deployment approach.
+
+### How It Works
+
+1. **GitHub Actions builds** the Docker image on GitHub's runners
+2. **Pushes** the image to GitHub Container Registry (ghcr.io)
+3. **SSH into VPS** and pulls the pre-built image
+4. **Restarts** containers with the new image
+
+### Initial VPS Setup
+
+```bash
+# On your VPS
+cd ~
+git clone https://github.com/oleksiy-perepelytsya/ids-ai.git
+cd ids-ai
+
+# Create .env file
+cp dotenv_example .env
+nano .env  # Add your API keys
+
+# First deployment - pull pre-built image
+docker compose pull
+docker compose up -d
+```
+
+### GitHub Secrets Configuration
+
+Add these to your repository (Settings → Secrets and variables → Actions):
+
+- `SSH_HOST`: Your VPS IP or hostname
+- `SSH_USERNAME`: SSH username (e.g., `oleksiy_perepelytsya`)
+- `SSH_PRIVATE_KEY`: Your SSH private key
+- `SSH_PORT`: SSH port (usually 22)
+
+### Automatic Deployments
+
+Every push to `master` branch will:
+1. Build Docker image in GitHub Actions
+2. Push to GitHub Container Registry
+3. Deploy to your VPS automatically
+
+### Manual Deployment
+
+```bash
+# On VPS, pull latest image and restart
+cd /home/oleksiy_perepelytsya/ids-ai
+git pull origin master
+docker compose pull
+docker compose up -d
+```
+
+### View Deployment Logs
+
+Check GitHub Actions tab in your repository to see build/deploy progress.
+
+### Troubleshooting CI/CD
+
+**Image pull fails:**
+```bash
+# Login to registry manually
+echo "YOUR_GITHUB_TOKEN" | docker login ghcr.io -u YOUR_USERNAME --password-stdin
+docker compose pull
+```
+
+**Deployment hangs:**
+```bash
+# Check SSH connection
+ssh -i ~/.ssh/id_rsa user@your-vps-ip
+
+# Check disk space on VPS
+df -h
+docker system df
+```
+
+**Clean up old images:**
+```bash
+docker image prune -af
+```
+
+---
+
 ## Production Deployment
 
 ### Security Checklist
