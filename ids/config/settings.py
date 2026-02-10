@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     sequential_agents: Optional[bool] = Field(default=None, description="If true, force sequential execution (overrides PARALLEL_AGENTS)")
     agent_delay_seconds: float = Field(default=2.0, description="Delay between sequential agent calls to avoid rate limits")
     
+    # Agent Enable/Disable Configuration
+    # Set to false to disable specific specialist agents from parliament
+    developer_progressive_enabled: bool = Field(default=True, description="Enable Developer Progressive agent")
+    developer_critic_enabled: bool = Field(default=True, description="Enable Developer Critic agent")
+    architect_progressive_enabled: bool = Field(default=True, description="Enable Architect Progressive agent")
+    architect_critic_enabled: bool = Field(default=True, description="Enable Architect Critic agent")
+    sre_progressive_enabled: bool = Field(default=True, description="Enable SRE Progressive agent")
+    sre_critic_enabled: bool = Field(default=True, description="Enable SRE Critic agent")
+    
     # Projects
     projects_root: str = Field(default="/projects", description="Root path for projects")
     default_project: str = Field(default="general", description="Default project context")
@@ -63,6 +72,26 @@ class Settings(BaseSettings):
     def get_allowed_users(self) -> List[int]:
         """Parse allowed Telegram user IDs"""
         return [int(uid.strip()) for uid in self.allowed_telegram_users.split(",")]
+    
+    def get_enabled_agents(self) -> List[str]:
+        """Get list of enabled specialist agent roles"""
+        from ids.models import AgentRole
+        
+        enabled = []
+        agent_settings = {
+            AgentRole.DEVELOPER_PROGRESSIVE: self.developer_progressive_enabled,
+            AgentRole.DEVELOPER_CRITIC: self.developer_critic_enabled,
+            AgentRole.ARCHITECT_PROGRESSIVE: self.architect_progressive_enabled,
+            AgentRole.ARCHITECT_CRITIC: self.architect_critic_enabled,
+            AgentRole.SRE_PROGRESSIVE: self.sre_progressive_enabled,
+            AgentRole.SRE_CRITIC: self.sre_critic_enabled,
+        }
+        
+        for role, is_enabled in agent_settings.items():
+            if is_enabled:
+                enabled.append(role)
+        
+        return enabled
 
     @property
     def chromadb_url(self) -> str:

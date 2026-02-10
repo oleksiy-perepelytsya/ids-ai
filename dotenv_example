@@ -27,6 +27,15 @@ PARALLEL_AGENTS=false
 SEQUENTIAL_AGENTS=true
 AGENT_DELAY_SECONDS=2.0
 
+# Agent Enable/Disable (set to false to disable specific agents)
+# All agents are enabled by default
+DEVELOPER_PROGRESSIVE_ENABLED=true
+DEVELOPER_CRITIC_ENABLED=true
+ARCHITECT_PROGRESSIVE_ENABLED=true
+ARCHITECT_CRITIC_ENABLED=true
+SRE_PROGRESSIVE_ENABLED=true
+SRE_CRITIC_ENABLED=true
+
 # Projects Root (where user projects are located)
 PROJECTS_ROOT=/projects
 
