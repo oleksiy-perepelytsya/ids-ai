@@ -15,27 +15,23 @@ def create_agent(role: AgentRole, llm_client: LLMClient) -> Agent:
 
 def create_all_agents(llm_client: LLMClient) -> dict:
     """
-    Create all 7 agents for Parliament.
+    Create all agents for Parliament based on settings.
+    Only creates agents that are enabled in configuration.
     
     Returns:
         Dict mapping role to agent instance
     """
+    from ids.config import settings
+    
     agents = {}
     
-    # Create Generalist
+    # Always create Generalist (required)
     agents[AgentRole.GENERALIST] = create_agent(AgentRole.GENERALIST, llm_client)
     
-    # Create specialized agents
-    specialized_roles = [
-        AgentRole.DEVELOPER_PROGRESSIVE,
-        AgentRole.DEVELOPER_CRITIC,
-        AgentRole.ARCHITECT_PROGRESSIVE,
-        AgentRole.ARCHITECT_CRITIC,
-        AgentRole.SRE_PROGRESSIVE,
-        AgentRole.SRE_CRITIC,
-    ]
+    # Create only enabled specialized agents
+    enabled_roles = settings.get_enabled_agents()
     
-    for role in specialized_roles:
+    for role in enabled_roles:
         agents[role] = create_agent(role, llm_client)
     
     return agents

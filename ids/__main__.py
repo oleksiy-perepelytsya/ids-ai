@@ -55,13 +55,19 @@ async def main():
         
         # Start bot
         logger.info("starting_telegram_bot")
+        
+        # Log enabled agents
+        enabled_agents = [role.value for role in settings.get_enabled_agents()]
+        
         logger.info(
             "ids_ready",
             allowed_users=len(settings.get_allowed_users()),
             max_rounds=settings.max_rounds,
             round_logging=settings.round_logging,
             agent_execution_mode="parallel" if settings.parallel_agents else "sequential",
-            agent_delay_seconds=settings.agent_delay_seconds
+            agent_delay_seconds=settings.agent_delay_seconds,
+            total_agents=len(agents),
+            enabled_specialists=enabled_agents
         )
         
         # Run polling
