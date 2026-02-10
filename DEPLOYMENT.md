@@ -242,18 +242,33 @@ docker stats
 
 ## Development Mode
 
-For development with code changes:
+There are two docker-compose configurations:
+
+### Production (`docker-compose.yml`)
+- Uses pre-built images from registry
+- No code volume mounts (code is baked into image)
+- Faster, cleaner deployment
 
 ```bash
-# Start with live reload
-docker-compose up
+# Production deployment
+docker compose pull
+docker compose up -d
+```
 
-# In separate terminal, make code changes
-# Container will auto-restart
+### Development (`docker-compose.dev.yml`)
+- Builds image locally
+- Mounts code directories for live reload
+- Changes to code are reflected immediately
+
+```bash
+# Development with live reload
+docker compose -f docker-compose.dev.yml up
 
 # Rebuild after dependency changes
-docker-compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
+
+**Important**: When using pre-built images (production), don't mount code volumes or you'll override the image contents with potentially outdated local files.
 
 ### View Live Logs
 
