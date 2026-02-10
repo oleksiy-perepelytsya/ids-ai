@@ -1,14 +1,18 @@
 version: '3.8'
 
+# Development configuration with code volume mounts for live reload
+# Usage: docker compose -f docker-compose.dev.yml up
+
 services:
   ids:
-    # Use pre-built image from GitHub Container Registry
-    image: ghcr.io/${GITHUB_REPOSITORY:-oleksiy-perepelytsya/ids-ai}:${IMAGE_TAG:-latest}
-    container_name: ids-app
+    build: .
+    container_name: ids-app-dev
     env_file:
       - .env
     volumes:
-      # Only mount projects directory (user data)
+      # Mount code for live development
+      - ./ids:/app/ids
+      - ./tests:/app/tests
       - ${PROJECTS_ROOT:-./projects}:/projects
     depends_on:
       - mongodb
@@ -19,22 +23,22 @@ services:
 
   mongodb:
     image: mongo:7
-    container_name: ids-mongodb
+    container_name: ids-mongodb-dev
     ports:
       - "27017:27017"
     volumes:
-      - mongodb_data:/data/db
+      - mongodb_data_dev:/data/db
     environment:
       - MONGO_INITDB_DATABASE=ids
     restart: unless-stopped
 
   chromadb:
     image: chromadb/chroma:latest
-    container_name: ids-chromadb
+    container_name: ids-chromadb-dev
     ports:
       - "8000:8000"
     volumes:
-      - chroma_data:/chroma/chroma
+      - chroma_data_dev:/chroma/chroma
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
@@ -42,15 +46,15 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: ids-redis
+    container_name: ids-redis-dev
     ports:
       - "6379:6379"
     volumes:
-      - redis_data:/data
+      - redis_data_dev:/data
     command: redis-server --appendonly yes
     restart: unless-stopped
 
 volumes:
-  mongodb_data:
-  chroma_data:
-  redis_data:
+  mongodb_data_dev:
+  chroma_data_dev:
+  redis_data_dev:
