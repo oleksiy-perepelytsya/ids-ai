@@ -142,12 +142,14 @@ class RoundExecutor:
         """Get responses from all specialized agents in parallel or sequential"""
         
         specialized_roles = [
-            AgentRole.DEVELOPER_PROGRESSIVE,
-            AgentRole.DEVELOPER_CRITIC,
-            AgentRole.ARCHITECT_PROGRESSIVE,
-            AgentRole.ARCHITECT_CRITIC,
-            AgentRole.SRE_PROGRESSIVE,
-            AgentRole.SRE_CRITIC,
+            role for role in [
+                AgentRole.DEVELOPER_PROGRESSIVE,
+                AgentRole.DEVELOPER_CRITIC,
+                AgentRole.ARCHITECT_PROGRESSIVE,
+                AgentRole.ARCHITECT_CRITIC,
+                AgentRole.SRE_PROGRESSIVE,
+                AgentRole.SRE_CRITIC,
+            ] if role in self.agents
         ]
         
         # Prepare previous rounds data
