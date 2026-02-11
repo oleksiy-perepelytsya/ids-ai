@@ -1,7 +1,6 @@
 """Unified agent implementation - all agents use this class with different personas"""
 
 import re
-import yaml
 from pathlib import Path
 from typing import Dict, List, Optional
 from ids.models import AgentRole, AgentResponse, CrossScore
@@ -24,28 +23,56 @@ class Agent:
         logger.info("agent_initialized", role=role)
     
     def _load_persona(self) -> Dict:
-        """Load persona configuration from YAML"""
+        """Load persona configuration from Markdown"""
         persona_file = self._get_persona_file()
         
         with open(persona_file, 'r') as f:
-            persona = yaml.safe_load(f)
+            content = f.read()
+        
+        # Simple Markdown parsing
+        persona = {
+            "role": "",
+            "system_prompt": "",
+            "personality_traits": [],
+            "focus_areas": []
+        }
+        
+        # Extract role (from # Role: line or role: line)
+        role_match = re.search(r'(?:^# Role:|^role:)\s*(.*)', content, re.MULTILINE | re.IGNORECASE)
+        if role_match:
+            persona["role"] = role_match.group(1).strip().strip('"').strip("'")
+            
+        # Extract system prompt (everything after # System Prompt or from system_prompt: block)
+        # Search for # System Prompt header
+        prompt_marker = re.search(r'^#+ System Prompt', content, re.MULTILINE | re.IGNORECASE)
+        if prompt_marker:
+            persona["system_prompt"] = content[prompt_marker.end():].strip()
+        else:
+            # Fallback to system_prompt: block if exists
+            prompt_match = re.search(r'system_prompt:\s*(.*)', content, re.DOTALL | re.IGNORECASE)
+            if prompt_match:
+                persona["system_prompt"] = prompt_match.group(1).strip()
+            else:
+                # Last resort: use the whole file as the prompt if no role was found
+                if not persona["role"]:
+                    persona["system_prompt"] = content.strip()
         
         logger.info("persona_loaded", role=self.role, file=str(persona_file))
         return persona
     
     def _get_persona_file(self) -> Path:
-        """Get path to persona YAML file"""
+        """Get path to persona Markdown file"""
         personas_dir = Path(__file__).parent / "personas"
         
         # Map role to filename
         role_to_file = {
-            AgentRole.GENERALIST: "generalist.yaml",
-            AgentRole.DEVELOPER_PROGRESSIVE: "developer_progressive.yaml",
-            AgentRole.DEVELOPER_CRITIC: "developer_critic.yaml",
-            AgentRole.ARCHITECT_PROGRESSIVE: "architect_progressive.yaml",
-            AgentRole.ARCHITECT_CRITIC: "architect_critic.yaml",
-            AgentRole.SRE_PROGRESSIVE: "sre_progressive.yaml",
-            AgentRole.SRE_CRITIC: "sre_critic.yaml",
+            AgentRole.GENERALIST: "generalist.md",
+            AgentRole.DEVELOPER_PROGRESSIVE: "developer_progressive.md",
+            AgentRole.DEVELOPER_CRITIC: "developer_critic.md",
+            AgentRole.ARCHITECT_PROGRESSIVE: "architect_progressive.md",
+            AgentRole.ARCHITECT_CRITIC: "architect_critic.md",
+            AgentRole.SRE_PROGRESSIVE: "sre_progressive.md",
+            AgentRole.SRE_CRITIC: "sre_critic.md",
         }
         
         filename = role_to_file.get(self.role)

@@ -127,3 +127,39 @@ You should see output like:
 | 1              | 2                   | ~4 seconds                    |
 
 *Times assume 2-second delay between calls (AGENT_DELAY_SECONDS=2.0)*
+
+---
+
+## Customizing Agent Personas
+
+Agent behaviors are defined in Markdown files located in `ids/agents/personas/`. You can edit these files to change how agents think and respond.
+
+### New Markdown Format
+
+To avoid YAML parsing issues, we now use a simple Markdown format:
+
+```md
+# Role: [Agent Name]
+
+# System Prompt
+[The instructions for the agent]
+```
+
+### Files
+- `generalist.md`
+- `developer_progressive.md`
+- `developer_critic.md`
+- `architect_progressive.md`
+- `architect_critic.md`
+- `sre_progressive.md`
+- `sre_critic.md`
+
+### How to Edit
+1. Open the `.md` file for the agent you want to customize.
+2. Update the `# System Prompt` section with new instructions.
+3. Save the file.
+4. Restart the bot for changes to take effect:
+   ```bash
+   docker compose restart ids
+   ```
+
