@@ -42,9 +42,9 @@ class Agent:
         if role_match:
             persona["role"] = role_match.group(1).strip().strip('"').strip("'")
             
-        # Extract system prompt (everything after # System Prompt or from system_prompt: block)
-        # Search for # System Prompt header
-        prompt_marker = re.search(r'^#+ System Prompt', content, re.MULTILINE | re.IGNORECASE)
+        # Extract system prompt (everything after # System Prompt header)
+        # Search for # System Prompt header (case insensitive, flexible spacing)
+        prompt_marker = re.search(r'^#+\s*System\s+Prompt', content, re.MULTILINE | re.IGNORECASE)
         if prompt_marker:
             persona["system_prompt"] = content[prompt_marker.end():].strip()
         else:
