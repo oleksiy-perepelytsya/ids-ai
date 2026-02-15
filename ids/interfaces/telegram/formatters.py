@@ -107,7 +107,7 @@ class TelegramFormatter:
     
     @staticmethod
     def format_round_update(round_result: RoundResult) -> str:
-        """Format round update for logging"""
+        """Format round update for logging and user display"""
         merged = round_result.merged_cross
         
         # Agreement indicator
@@ -118,17 +118,19 @@ class TelegramFormatter:
         else:
             agreement = "⚠️ Divergent Views"
         
-        msg = (
-            f"📊 *Round {round_result.round_number} Complete*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"*Scores:*\n"
-            f"• Confidence: {merged.avg_confidence:.1f}%\n"
-            f"• Risk: {merged.max_risk:.1f}%\n"
-            f"• Outcome: {merged.avg_outcome:.1f}%\n\n"
-            f"*Status:* {agreement}\n"
-        )
+        msg = [
+            f"📊 *Round {round_result.round_number} Complete*\n",
+            f"━━━━━━━━━━━━━━━━━━━━\n\n",
+            f"*Scores:*\n",
+            f"• Confidence: {merged.avg_confidence:.1f}%\n",
+            f"• Risk: {merged.max_risk:.1f}%\n",
+            f"• Outcome: {merged.avg_outcome:.1f}%\n\n",
+            f"*Status:* {agreement}\n\n",
+            f"*Generalist Analysis:*\n",
+            f"```\n{round_result.generalist_response.raw_response}\n```"
+        ]
         
-        return msg
+        return "".join(msg)
     
     @staticmethod
     def format_project_list(projects: List[Project]) -> str:

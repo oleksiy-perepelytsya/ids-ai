@@ -82,7 +82,7 @@ class SessionManager:
         progress_callback: Optional[Callable[[str], Awaitable[None]]] = None
     ) -> DevSession:
         """
-        Run complete multi-round deliberation.
+        Run a single deliberation round.
         
         Args:
             session: Session to run deliberation for
@@ -96,75 +96,46 @@ class SessionManager:
         
         logger.info("deliberation_started", session_id=session.session_id)
         
-        max_rounds = settings.max_rounds
+        round_num = session.get_current_round_number()
         
-        for round_num in range(1, max_rounds + 1):
-            # Send progress update
-            if progress_callback:
-                await progress_callback(f"⏳ Round {round_num} in progress...")
-            
-            # Execute round
-            round_result = await self.round_executor.execute_round(session, round_num)
-            
-            # Add to session
-            session.add_round(round_result)
+        # Check if we've already reached max rounds
+        if round_num > settings.max_rounds:
+            session.status = SessionStatus.DEAD_END
             await self.session_store.update_session(session)
-            
-            # Send round result update (if logging enabled)
-            if settings.round_logging and progress_callback:
-                update_msg = self._format_round_update(round_result)
-                await progress_callback(update_msg)
-            
-            # Check decision
-            if round_result.decision == DecisionResult.CONSENSUS:
-                session.status = SessionStatus.CONSENSUS
-                await self.session_store.update_session(session)
-                
-                logger.info(
-                    "consensus_reached",
-                    session_id=session.session_id,
-                    round_num=round_num
-                )
-                
-                if progress_callback:
-                    await progress_callback("✅ Consensus reached!")
-                
-                return session
-            
-            elif round_result.decision == DecisionResult.DEAD_END:
-                session.status = SessionStatus.DEAD_END
-                await self.session_store.update_session(session)
-                
-                logger.info(
-                    "dead_end_reached",
-                    session_id=session.session_id,
-                    round_num=round_num
-                )
-                
-                if progress_callback:
-                    await progress_callback("⚠️ Dead-end reached. Need your guidance...")
-                
-                return session
-            
-            # Continue to next round
             if progress_callback:
-                await progress_callback(f"Continuing to Round {round_num + 1}...")
-        
-        # Max rounds reached without consensus
-        session.status = SessionStatus.DEAD_END
-        await self.session_store.update_session(session)
-        
-        logger.info(
-            "max_rounds_reached",
-            session_id=session.session_id,
-            rounds=max_rounds
-        )
-        
+                await progress_callback(
+                    f"⚠️ Reached maximum rounds ({settings.max_rounds}). Need your guidance..."
+                )
+            return session
+
+        # Send progress update
         if progress_callback:
-            await progress_callback(
-                f"⚠️ Reached maximum rounds ({max_rounds}). Need your guidance..."
-            )
+            await progress_callback(f"⏳ Round {round_num} in progress...")
         
+        # Execute round
+        round_result = await self.round_executor.execute_round(session, round_num)
+        
+        # Add to session
+        session.add_round(round_result)
+        
+        # Update status based on decision
+        if round_result.decision == DecisionResult.CONSENSUS:
+            session.status = SessionStatus.CONSENSUS
+            logger.info("consensus_reached", session_id=session.session_id, round_num=round_num)
+            if progress_callback:
+                await progress_callback("✅ Consensus reached!")
+        elif round_result.decision == DecisionResult.DEAD_END:
+            session.status = SessionStatus.DEAD_END
+            logger.info("dead_end_reached", session_id=session.session_id, round_num=round_num)
+            if progress_callback:
+                await progress_callback("⚠️ Dead-end reached. Need your guidance...")
+        else:
+            # Continue to next round but pause for user input
+            session.status = SessionStatus.AWAITING_CONTINUATION
+            logger.info("awaiting_continuation", session_id=session.session_id, next_round=round_num + 1)
+            # Note: The actual "Continuing to Round X" message and buttons will be handled by Telegram
+        
+        await self.session_store.update_session(session)
         return session
     
     async def handle_user_feedback(
@@ -248,25 +219,3 @@ class SessionManager:
         logger.info("session_cancelled", session_id=session_id)
         
         return session
-    
-    def _format_round_update(self, round_result: RoundResult) -> str:
-        """Format round result for Telegram display"""
-        merged = round_result.merged_cross
-        
-        # Agreement indicator
-        if merged.std_confidence < 10:
-            agreement = "🎯 High"
-        elif merged.std_confidence < 20:
-            agreement = "👍 Good"
-        else:
-            agreement = "⚠️ Divergent"
-        
-        msg = (
-            f"📊 Round {round_result.round_number} Results:\n\n"
-            f"Confidence: {merged.avg_confidence:.1f}%\n"
-            f"Risk: {merged.max_risk:.1f}%\n"
-            f"Outcome: {merged.avg_outcome:.1f}%\n"
-            f"Agreement: {agreement}\n"
-        )
-        
-        return msg

@@ -14,6 +14,7 @@ class SessionStatus(str, Enum):
     PENDING = "pending"       # Created, not started
     CLARIFYING = "clarifying" # Asking user for clarifications
     DELIBERATING = "deliberating"  # Active deliberation
+    AWAITING_CONTINUATION = "awaiting_continuation" # Paused between rounds
     CONSENSUS = "consensus"   # Consensus reached
     DEAD_END = "dead_end"     # Needs user feedback
     COMPLETED = "completed"   # Fully complete

@@ -76,6 +76,7 @@ class MongoSessionStore(BaseSessionStore):
                 SessionStatus.PENDING,
                 SessionStatus.CLARIFYING,
                 SessionStatus.DELIBERATING,
+                SessionStatus.AWAITING_CONTINUATION,
                 SessionStatus.DEAD_END
             ]}
         })

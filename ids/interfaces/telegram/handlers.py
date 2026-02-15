@@ -294,20 +294,8 @@ class TelegramHandlers:
                 progress_callback=send_update
             )
             
-            # Send final result
-            if session.status == SessionStatus.CONSENSUS:
-                result_msg = self.formatter.format_consensus_decision(session)
-                await update.message.reply_text(
-                    result_msg,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            elif session.status == SessionStatus.DEAD_END:
-                dead_end_msg = self.formatter.format_dead_end(session)
-                await update.message.reply_text(
-                    dead_end_msg,
-                    parse_mode=ParseMode.MARKDOWN,
-                    reply_markup=self.keyboards.dead_end_keyboard()
-                )
+            # Send final result based on status
+            await self._send_session_status_update(update, session)
         
         except Exception as e:
             logger.error("deliberation_error", error=str(e), session_id=session.session_id)
@@ -336,18 +324,8 @@ class TelegramHandlers:
                 progress_callback=send_update
             )
             
-            # Send result
-            if session.status == SessionStatus.CONSENSUS:
-                result_msg = self.formatter.format_consensus_decision(session)
-                await update.message.reply_text(
-                    result_msg,
-                    parse_mode=ParseMode.MARKDOWN
-                )
-            elif session.status == SessionStatus.DEAD_END:
-                await update.message.reply_text(
-                    "Still at dead-end. Need more guidance.",
-                    reply_markup=self.keyboards.dead_end_keyboard()
-                )
+            # Send status update
+            await self._send_session_status_update(update, session)
         
         except Exception as e:
             logger.error("continue_error", error=str(e))
@@ -389,6 +367,11 @@ class TelegramHandlers:
                 if session:
                     await self.session_manager.cancel_session(session.session_id)
                     await query.edit_message_text("❌ Session cancelled.")
+            
+            elif action == "continue":
+                session = await self.session_manager.session_store.get_active_session(user_id)
+                if session:
+                    await self._handle_continuation(query, session)
     
     async def cmd_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -623,3 +606,50 @@ class TelegramHandlers:
         except Exception as e:
             logger.error("export_failed", error=str(e), session_id=session.session_id if session else "unknown")
             await update.message.reply_text(f"❌ Export failed: {str(e)}")
+    async def _handle_continuation(self, query, session):
+        """Handle session continuation after pause"""
+        await query.edit_message_text("⏳ Continuing deliberation...")
+        
+        async def send_update(msg: str):
+            await query.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        
+        try:
+            session = await self.session_manager.run_deliberation(
+                session,
+                progress_callback=send_update
+            )
+            
+            # Send status update
+            await self._send_session_status_update(query, session)
+        
+        except Exception as e:
+            logger.error("continue_error", error=str(e))
+            await query.message.reply_text(f"❌ Error: {str(e)}")
+    async def _send_session_status_update(self, update_or_query, session):
+        """Send appropriate message based on current session status"""
+        # Determine the correct target for reply_text
+        if hasattr(update_or_query, 'message') and update_or_query.message:
+            target = update_or_query.message
+        else:
+            target = update_or_query
+            
+        if session.status == SessionStatus.CONSENSUS:
+            result_msg = self.formatter.format_consensus_decision(session)
+            await target.reply_text(
+                result_msg,
+                parse_mode=ParseMode.MARKDOWN
+            )
+        elif session.status == SessionStatus.DEAD_END:
+            dead_end_msg = self.formatter.format_dead_end(session)
+            await target.reply_text(
+                dead_end_msg,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self.keyboards.dead_end_keyboard()
+            )
+        elif session.status == SessionStatus.AWAITING_CONTINUATION:
+            round_msg = self.formatter.format_round_update(session.rounds[-1])
+            await target.reply_text(
+                round_msg,
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=self.keyboards.session_continue_keyboard()
+            )
