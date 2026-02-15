@@ -31,7 +31,7 @@ class TelegramFormatter:
         
         # Add Generalist's recommendation (as the synthesized view)
         generalist_approach = last_round.generalist_cross.explanation
-        msg_parts.append(f"*Decision:*\n{generalist_approach}\n\n")
+        msg_parts.append(f"*Decision:*\n{TelegramFormatter.escape_markdown(generalist_approach)}\n\n")
         
         # Add key concerns from all agents
         all_concerns = []
@@ -43,7 +43,7 @@ class TelegramFormatter:
             # Show top 5 unique concerns
             unique_concerns = list(dict.fromkeys(all_concerns))[:5]
             for concern in unique_concerns:
-                msg_parts.append(f"• {concern}\n")
+                msg_parts.append(f"• {TelegramFormatter.escape_markdown(concern)}\n")
         
         msg_parts.append(f"\n📝 Completed in {len(session.rounds)} round(s)")
         
@@ -85,16 +85,19 @@ class TelegramFormatter:
                 sre_views.append(resp)
         
         if dev_views:
+            approach = TelegramFormatter.escape_markdown(dev_views[0].proposed_approach[:150])
             msg_parts.append("👨‍💻 *Developer View:*\n")
-            msg_parts.append(f"{dev_views[0].proposed_approach[:150]}...\n\n")
+            msg_parts.append(f"{approach}...\n\n")
         
         if arch_views:
+            approach = TelegramFormatter.escape_markdown(arch_views[0].proposed_approach[:150])
             msg_parts.append("🏗️ *Architect View:*\n")
-            msg_parts.append(f"{arch_views[0].proposed_approach[:150]}...\n\n")
+            msg_parts.append(f"{approach}...\n\n")
         
         if sre_views:
+            approach = TelegramFormatter.escape_markdown(sre_views[0].proposed_approach[:150])
             msg_parts.append("⚙️ *SRE View:*\n")
-            msg_parts.append(f"{sre_views[0].proposed_approach[:150]}...\n\n")
+            msg_parts.append(f"{approach}...\n\n")
         
         msg_parts.append(
             "I need your guidance to proceed. Please provide:\n"
@@ -118,6 +121,9 @@ class TelegramFormatter:
         else:
             agreement = "⚠️ Divergent Views"
         
+        # Escape triple backticks in raw response to avoid breaking the block
+        content = round_result.generalist_response.raw_response.replace("```", "'''")
+        
         msg = [
             f"📊 *Round {round_result.round_number} Complete*\n",
             f"━━━━━━━━━━━━━━━━━━━━\n\n",
@@ -127,7 +133,7 @@ class TelegramFormatter:
             f"• Outcome: {merged.avg_outcome:.1f}%\n\n",
             f"*Status:* {agreement}\n\n",
             f"*Generalist Analysis:*\n",
-            f"```\n{round_result.generalist_response.raw_response}\n```"
+            f"```\n{content}\n```"
         ]
         
         return "".join(msg)
@@ -177,8 +183,8 @@ class TelegramFormatter:
     
     @staticmethod
     def escape_markdown(text: str) -> str:
-        """Escape special characters for Telegram MarkdownV2"""
-        special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-        for char in special_chars:
-            text = text.replace(char, f'\\{char}')
-        return text
+        """Escape special characters for Telegram Markdown (Legacy)"""
+        if not text:
+            return ""
+        # Characters to escape: _ * ` [
+        return text.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
