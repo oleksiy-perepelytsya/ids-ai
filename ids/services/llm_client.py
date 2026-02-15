@@ -110,3 +110,21 @@ class LLMClient:
         except Exception as e:
             logger.error("claude_call_failed", error=str(e))
             raise
+
+    async def call_model(
+        self,
+        model: str,
+        prompt: str,
+        system_prompt: str = None,
+        temperature: float = 0.7
+    ) -> str:
+        """Call a specific model based on string"""
+        if "claude" in model.lower():
+            # If a specific version is requested, we'd need to update self.claude_model temporarily
+            # For now, just use the configured claude method
+            return await self.call_claude(prompt, system_prompt, temperature)
+        elif "gemini" in model.lower():
+            return await self.call_gemini(prompt, system_prompt, temperature)
+        else:
+            # Fallback
+            return await self.call_gemini(prompt, system_prompt, temperature)

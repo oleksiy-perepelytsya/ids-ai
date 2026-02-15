@@ -16,6 +16,7 @@ class AgentRole(str, Enum):
     ARCHITECT_CRITIC = "architect_critic"
     SRE_PROGRESSIVE = "sre_progressive"
     SRE_CRITIC = "sre_critic"
+    SOURCER = "sourcer"
 
 
 class AgentResponse(BaseModel):

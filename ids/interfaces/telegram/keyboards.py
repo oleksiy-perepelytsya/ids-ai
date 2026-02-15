@@ -52,7 +52,10 @@ class TelegramKeyboards:
     def session_continue_keyboard() -> InlineKeyboardMarkup:
         """Keyboard for continuing a session"""
         keyboard = [
-            [InlineKeyboardButton("✅ Continue", callback_data="session:continue")],
+            [
+                InlineKeyboardButton("✅ Continue", callback_data="session:continue"),
+                InlineKeyboardButton("💬 Add Comment", callback_data="session:comment")
+            ],
             [InlineKeyboardButton("❌ Cancel", callback_data="session:cancel")]
         ]
         return InlineKeyboardMarkup(keyboard)

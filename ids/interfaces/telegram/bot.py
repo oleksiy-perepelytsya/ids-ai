@@ -46,6 +46,8 @@ def create_bot(
     app.add_handler(CommandHandler("history", handlers.cmd_history))
     app.add_handler(CommandHandler("cancel", handlers.cmd_cancel))
     app.add_handler(CommandHandler("export", handlers.cmd_export))
+    app.add_handler(CommandHandler("sourcer", handlers.cmd_sourcer))
+    app.add_handler(CommandHandler("learn", handlers.cmd_learn))
     
     # Register message handler (for task submission)
     app.add_handler(MessageHandler(

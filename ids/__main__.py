@@ -42,11 +42,12 @@ async def main():
         # Initialize orchestrator
         logger.info("initializing_orchestrator")
         consensus_builder = ConsensusBuilder()
-        round_executor = RoundExecutor(agents, consensus_builder)
+        round_executor = RoundExecutor(agents, consensus_builder, chroma_store)
         session_manager = SessionManager(
             round_executor=round_executor,
             session_store=session_store,
-            project_store=project_store
+            project_store=project_store,
+            chroma_store=chroma_store
         )
         
         # Create Telegram bot

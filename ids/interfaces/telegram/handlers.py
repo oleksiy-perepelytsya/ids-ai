@@ -32,6 +32,10 @@ class TelegramHandlers:
         # Track active projects per user
         self.user_projects = {}  # user_id -> project_name
         
+        # UI States
+        self.awaiting_comment = {}  # user_id -> True
+        self.awaiting_learn = {}    # user_id -> True
+        
         logger.info("telegram_handlers_initialized")
     
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -103,6 +107,74 @@ class TelegramHandlers:
             help_msg,
             parse_mode=ParseMode.MARKDOWN
         )
+
+    async def cmd_learn(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /learn command"""
+        user_id = update.effective_user.id
+        project_name = self.user_projects.get(user_id)
+        
+        if not project_name:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        if context.args:
+            text = " ".join(context.args)
+            await self.session_manager.learn_from_text(project_name, text)
+            await update.message.reply_text(f"📝 Added to knowledge base for project: *{project_name}*", parse_mode=ParseMode.MARKDOWN)
+        else:
+            self.awaiting_learn[user_id] = True
+            await update.message.reply_text("📝 Please send the text you want me to learn and store in the knowledge base.")
+
+    async def cmd_sourcer(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /sourcer command: /sourcer <model> <query>"""
+        user_id = update.effective_user.id
+        project_name = self.user_projects.get(user_id)
+        
+        if not project_name:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        if not context.args or len(context.args) < 2:
+            await update.message.reply_text(
+                "🔍 *Sourcer Mode*\n"
+                "Usage: `/sourcer <model> <query>`\n\n"
+                "Models: `claude`, `gemini`\n"
+                "Example: `/sourcer claude what is the current db schema?`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        model_choice = context.args[0].lower()
+        if model_choice not in ["claude", "gemini"]:
+             await update.message.reply_text("❌ Invalid model. Use `claude` or `gemini`.")
+             return
+
+        query = " ".join(context.args[1:])
+        await update.message.reply_text(f"🔍 *Sourcer* is analyzing using *{model_choice}*...", parse_mode=ParseMode.MARKDOWN)
+
+        try:
+            # Send typing action
+            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+            
+            response = await self.session_manager.run_sourcer(
+                project_name=project_name,
+                task=query,
+                model=model_choice
+            )
+            
+            # Format response (minimal formatting for sourcer)
+            msg = [
+                f"📝 *Sourcer Response* ({model_choice})\n",
+                "━━━━━━━━━━━━━━━━━━━━\n\n",
+                response
+            ]
+            
+            # Use chunks if response is too long
+            await update.message.reply_text("".join(msg), parse_mode=ParseMode.MARKDOWN)
+            
+        except Exception as e:
+            logger.error("sourcer_error", error=str(e))
+            await update.message.reply_text(f"❌ Sourcer Error: {str(e)}")
     
     async def cmd_register_project(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /register_project command"""
@@ -238,33 +310,81 @@ class TelegramHandlers:
         await update.message.reply_text("❌ Session cancelled.")
     
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle regular text messages (task submission)"""
+        """Handle incoming text messages"""
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
         text = update.message.text
         
         # Check whitelist
         if user_id not in settings.get_allowed_users():
-            await update.message.reply_text("⛔ Unauthorized")
+            return
+            
+        # 1. Handle Awaiting Comment (Feedback for next round)
+        if self.awaiting_comment.get(user_id):
+            session = await self.session_manager.session_store.get_active_session(user_id)
+            if session:
+                # Add to context
+                session.context = f"{session.context}\n\nUser Comment: {text}"
+                await self.session_manager.session_store.update_session(session)
+                
+                # Also store as learning pattern
+                if session.project_name:
+                    await self.session_manager.learn_from_text(session.project_name, f"Context (User Feedback): {text}")
+                
+                self.awaiting_comment[user_id] = False
+                await update.message.reply_text("✅ Comment added for the next round! Click 'Continue' when ready.")
+                return
+            else:
+                self.awaiting_comment[user_id] = False
+
+        # 2. Handle Awaiting Learn (Direct data entry)
+        if self.awaiting_learn.get(user_id):
+            project_name = self.user_projects.get(user_id)
+            if project_name:
+                await self.session_manager.learn_from_text(project_name, text)
+                self.awaiting_learn[user_id] = False
+                await update.message.reply_text(f"📝 Added to knowledge base for project: *{project_name}*", parse_mode=ParseMode.MARKDOWN)
+                return
+            else:
+                self.awaiting_learn[user_id] = False
+                await update.message.reply_text("❌ No active project. Please use /project first.")
+                return
+
+        # 3. Standard Deliberation or direct learning (if no session)
+        session = await self.session_manager.session_store.get_active_session(user_id)
+        
+        if session:
+            if session.status == SessionStatus.DEAD_END:
+                await self._handle_dead_end_feedback(update, session, text)
+            else:
+                await update.message.reply_text(
+                    "⚠️ You have an active session. Use /cancel to cancel it first."
+                )
             return
         
-        # Check for active session
-        active = await self.session_manager.session_store.get_active_session(user_id)
-        if active and active.status == SessionStatus.DEAD_END:
-            # This is feedback for dead-end
-            await self._handle_dead_end_feedback(update, active, text)
-            return
-        
-        if active and active.status in [SessionStatus.DELIBERATING, SessionStatus.PENDING]:
-            await update.message.reply_text(
-                "⚠️ You have an active session. Use /cancel to cancel it first."
-            )
-            return
-        
-        # Create new session
+        # If we got here, there's no active session. 
         project_name = self.user_projects.get(user_id)
+        if project_name and not text.startswith("/"):
+            if text.strip().endswith("?"):
+                # Start deliberation
+                await self._start_deliberation(update, context, text, project_name)
+            else:
+                # Add to knowledge
+                await self.session_manager.learn_from_text(project_name, text)
+                await update.message.reply_text(
+                    f"📚 Knowledge captured for project *{project_name}*.\n"
+                    "I will use this information in future deliberations.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+        elif not project_name and not text.startswith("/"):
+             await update.message.reply_text("❌ No active project selected. Use /project.")
+
+    async def _start_deliberation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, project_name: str):
+        """Internal helper to start deliberation"""
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
         
-        await update.message.reply_text("🏛️ Starting Parliament deliberation...")
+        await update.message.reply_text("🏛️ *Starting Parliament deliberation...*", parse_mode=ParseMode.MARKDOWN)
         
         session = await self.session_manager.create_session(
             telegram_user_id=user_id,
@@ -372,6 +492,9 @@ class TelegramHandlers:
                 session = await self.session_manager.session_store.get_active_session(user_id)
                 if session:
                     await self._handle_continuation(query, session)
+            elif action == "comment":
+                self.awaiting_comment[user_id] = True
+                await query.message.reply_text("💬 Please send your comment/feedback. It will be added to the next round's context.")
     
     async def cmd_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """

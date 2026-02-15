@@ -73,6 +73,7 @@ class Agent:
             AgentRole.ARCHITECT_CRITIC: "architect_critic.md",
             AgentRole.SRE_PROGRESSIVE: "sre_progressive.md",
             AgentRole.SRE_CRITIC: "sre_critic.md",
+            AgentRole.SOURCER: "sourcer.md",
         }
         
         filename = role_to_file.get(self.role)
@@ -86,7 +87,9 @@ class Agent:
         task: str,
         context: str = "",
         previous_rounds: Optional[List[Dict]] = None,
-        generalist_cross: Optional[CrossScore] = None
+        generalist_cross: Optional[CrossScore] = None,
+        learning_patterns: Optional[List[Dict]] = None,
+        model_override: Optional[str] = None
     ) -> AgentResponse:
         """
         Analyze task and provide CROSS scoring + recommendation.
@@ -96,15 +99,25 @@ class Agent:
             context: Additional context about the task
             previous_rounds: History of previous deliberation rounds
             generalist_cross: Generalist's CROSS score (for specialized agents)
+            learning_patterns: Relevant context found in vector DB
+            model_override: Specific model to use (for Sourcer mode)
             
         Returns:
             AgentResponse with CROSS scores and analysis
         """
         # Build prompt
-        prompt = self._build_prompt(task, context, previous_rounds, generalist_cross)
+        prompt = self._build_prompt(task, context, previous_rounds, generalist_cross, learning_patterns)
         
         # Call appropriate LLM
-        if self.role == AgentRole.GENERALIST:
+        if model_override:
+            # Use specific model if requested
+            response_text = await self.llm_client.call_model(
+                model=model_override,
+                prompt=prompt,
+                system_prompt=self.persona["system_prompt"],
+                temperature=0.7
+            )
+        elif self.role == AgentRole.GENERALIST:
             response_text = await self.llm_client.call_claude(
                 prompt=prompt,
                 system_prompt=self.persona["system_prompt"],
@@ -145,7 +158,8 @@ class Agent:
         task: str,
         context: str,
         previous_rounds: Optional[List[Dict]],
-        generalist_cross: Optional[CrossScore]
+        generalist_cross: Optional[CrossScore],
+        learning_patterns: Optional[List[Dict]] = None
     ) -> str:
         """Build the prompt for LLM"""
         prompt_parts = []
@@ -156,6 +170,12 @@ class Agent:
         # Context (if any)
         if context:
             prompt_parts.append(f"ADDITIONAL CONTEXT:\n{context}\n")
+        
+        # Learning Patterns (RAG)
+        if learning_patterns:
+            prompt_parts.append("\nRELEVANT LEARNING PATTERNS & HISTORICAL DATA:\n")
+            for i, pattern in enumerate(learning_patterns, 1):
+                prompt_parts.append(f"Pattern {i}: {pattern.get('content')}\n")
         
         # Generalist's initial analysis (for specialized agents)
         if generalist_cross:

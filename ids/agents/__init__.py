@@ -25,8 +25,9 @@ def create_all_agents(llm_client: LLMClient) -> dict:
     
     agents = {}
     
-    # Always create Generalist (required)
+    # Always create Generalist and Sourcer (required)
     agents[AgentRole.GENERALIST] = create_agent(AgentRole.GENERALIST, llm_client)
+    agents[AgentRole.SOURCER] = create_agent(AgentRole.SOURCER, llm_client)
     
     # Create only enabled specialized agents
     enabled_roles = settings.get_enabled_agents()

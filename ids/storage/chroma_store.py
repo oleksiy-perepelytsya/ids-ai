@@ -162,3 +162,62 @@ class ChromaStore:
             codebase_parts.append(f"# File: {filepath}\n{content}\n\n")
         
         return "\n".join(codebase_parts)
+
+    async def add_learning_pattern(
+        self,
+        project_id: str,
+        content: str,
+        metadata: Optional[Dict] = None
+    ) -> None:
+        """
+        Add a learning pattern (feedback or text insight) to ChromaDB.
+        
+        Args:
+            project_id: Project identifier
+            content: The text to learn
+            metadata: Optional additional metadata
+        """
+        collection_name = f"learning_{project_id}"
+        collection = self.get_or_create_collection(collection_name)
+        
+        import uuid
+        pattern_id = f"pattern_{uuid.uuid4().hex[:8]}"
+        
+        collection.add(
+            documents=[content],
+            metadatas=[metadata or {"project_id": project_id, "type": "learning"}],
+            ids=[pattern_id]
+        )
+        logger.info("learning_pattern_added", project_id=project_id, pattern_id=pattern_id)
+
+    async def search_learning_patterns(
+        self,
+        project_id: str,
+        query: str,
+        n_results: int = 5
+    ) -> List[Dict]:
+        """
+        Search for relevant learning patterns.
+        """
+        collection_name = f"learning_{project_id}"
+        try:
+            collection = self.client.get_collection(name=collection_name)
+        except Exception:
+            logger.warning("learning_store_not_found", project_id=project_id)
+            return []
+        
+        results = collection.query(
+            query_texts=[query],
+            n_results=n_results
+        )
+        
+        formatted = []
+        if results["documents"]:
+            for i, doc in enumerate(results["documents"][0]):
+                formatted.append({
+                    "content": doc,
+                    "metadata": results["metadatas"][0][i],
+                    "distance": results["distances"][0][i] if "distances" in results else None
+                })
+        
+        return formatted

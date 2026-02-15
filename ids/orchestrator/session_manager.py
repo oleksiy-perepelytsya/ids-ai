@@ -9,7 +9,7 @@ from ids.models import (
     DecisionResult,
     RoundResult
 )
-from ids.storage import MongoSessionStore, MongoProjectStore
+from ids.storage import MongoSessionStore, MongoProjectStore, ChromaStore
 from ids.orchestrator.round_executor import RoundExecutor
 from ids.config import settings
 from ids.utils import get_logger
@@ -27,11 +27,13 @@ class SessionManager:
         self,
         round_executor: RoundExecutor,
         session_store: MongoSessionStore,
-        project_store: MongoProjectStore
+        project_store: MongoProjectStore,
+        chroma_store: Optional[ChromaStore] = None
     ):
         self.round_executor = round_executor
         self.session_store = session_store
         self.project_store = project_store
+        self.chroma_store = chroma_store
         logger.info("session_manager_initialized")
     
     async def create_session(
@@ -219,3 +221,47 @@ class SessionManager:
         logger.info("session_cancelled", session_id=session_id)
         
         return session
+
+    async def learn_from_text(self, project_name: str, text: str) -> None:
+        """Directly store text as learning data in ChromaDB"""
+        if self.chroma_store:
+            await self.chroma_store.add_learning_pattern(
+                project_id=project_name,
+                content=text,
+                metadata={"type": "direct_learning", "timestamp": datetime.utcnow().isoformat()}
+            )
+            logger.info("direct_learning_added", project=project_name)
+
+    async def run_sourcer(
+        self,
+        project_name: str,
+        task: str,
+        model: str
+    ) -> str:
+        """Run single-agent 'Sourcer' mode with RAG"""
+        from ids.models import AgentRole
+        
+        sourcer = self.round_executor.agents.get(AgentRole.SOURCER)
+        if not sourcer:
+            raise ValueError("Sourcer agent not initialized")
+
+        # Step 1: Retrieval (RAG)
+        learning_patterns = []
+        if self.chroma_store:
+            learning_patterns = await self.chroma_store.search_learning_patterns(
+                project_id=project_name,
+                query=task
+            )
+
+        # Step 2: Analyze
+        response = await sourcer.analyze(
+            task=task,
+            learning_patterns=learning_patterns,
+            model_override=model
+        )
+
+        # Step 3: Always learn from the response too? 
+        # User didn't express it but it makes sense. 
+        # For now, just return.
+
+        return response.raw_response
