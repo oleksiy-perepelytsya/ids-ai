@@ -8,7 +8,7 @@ IDS (Intelligent Development System) is a multi-agent AI deliberation platform a
 
 **Budget target:** $10/month. Gemini handles ~90% of operations; Claude handles ~10% critical decisions.
 
-**Status:** Phase 1 complete (deliberation), Phase 2 in progress (code generation, file ops, git integration).
+**Status:** Phase 1 complete (deliberation), Phase 2 active (Claude Code integration for implementation).
 
 ## Commands
 
@@ -53,6 +53,21 @@ User (Telegram) → Bot Handlers → SessionManager → RoundExecutor
    - `ConsensusBuilder` evaluates scores against thresholds in `ids/config/thresholds.yaml`
 4. Result: consensus reached, dead-end detected, or user feedback requested
 5. Successful patterns stored in ChromaDB for future retrieval
+
+### Claude Code Integration (Phase 2)
+
+After consensus, users can press "Implement" to invoke Claude Code CLI (`claude -p`) against the target project. The `/code` command also supports direct implementation without deliberation.
+
+```
+Consensus Decision → CodeWorkflow._build_consensus_prompt() → ClaudeCodeExecutor
+                                                                      ↓
+                                                              claude -p --output-format json
+                                                                      ↓
+                                                              ClaudeCodeResult → Telegram
+```
+
+- **`ids/services/claude_code.py`** — Async subprocess wrapper around `claude -p` CLI.
+- **`ids/orchestrator/code_workflow.py`** — Orchestrates implementation: `implement_from_consensus()` (post-deliberation) and `implement_direct()` (via `/code` command).
 
 ### Key Components
 

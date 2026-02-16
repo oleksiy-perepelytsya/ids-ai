@@ -2,6 +2,7 @@
 
 from typing import List
 from ids.models import RoundResult, AgentResponse, CrossScore, DevSession, Project
+from ids.models.code_task import ClaudeCodeResult
 from ids.utils import get_logger
 
 logger = get_logger(__name__)
@@ -181,6 +182,42 @@ class TelegramFormatter:
         
         return "".join(msg_parts)
     
+    @staticmethod
+    def format_implementation_result(result: ClaudeCodeResult) -> str:
+        """Format Claude Code implementation result for Telegram display"""
+        if result.success:
+            status = "✅ *IMPLEMENTATION COMPLETE*"
+        else:
+            status = "❌ *IMPLEMENTATION FAILED*"
+
+        msg_parts = [
+            f"{status}\n",
+            "━━━━━━━━━━━━━━━━━━━━\n\n",
+        ]
+
+        if result.result_text:
+            # Truncate long results for Telegram (4096 char limit)
+            text = result.result_text
+            if len(text) > 3000:
+                text = text[:3000] + "\n\n... (truncated)"
+            # Escape triple backticks to avoid breaking markdown
+            text = text.replace("```", "'''")
+            msg_parts.append(f"*Result:*\n```\n{text}\n```\n\n")
+
+        if result.error_message:
+            msg_parts.append(
+                f"*Error:* {TelegramFormatter.escape_markdown(result.error_message)}\n\n"
+            )
+
+        msg_parts.append(
+            f"*Stats:*\n"
+            f"• Turns: {result.num_turns}\n"
+            f"• Cost: ${result.cost_usd:.4f}\n"
+            f"• Duration: {result.duration_ms / 1000:.1f}s\n"
+        )
+
+        return "".join(msg_parts)
+
     @staticmethod
     def escape_markdown(text: str) -> str:
         """Escape special characters for Telegram Markdown (Legacy)"""

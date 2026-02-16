@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     sre_progressive_enabled: bool = Field(default=True, description="Enable SRE Progressive agent")
     sre_critic_enabled: bool = Field(default=True, description="Enable SRE Critic agent")
     
+    # Claude Code Integration
+    claude_code_enabled: bool = Field(default=True, description="Enable Claude Code implementation engine")
+    claude_code_model: str = Field(default="sonnet", description="Model for Claude Code CLI")
+    claude_code_max_turns: int = Field(default=10, description="Max agentic turns for Claude Code")
+
     # Projects
     projects_root: str = Field(default="/projects", description="Root path for projects")
     default_project: str = Field(default="general", description="Default project context")

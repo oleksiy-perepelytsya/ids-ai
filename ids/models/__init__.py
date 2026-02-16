@@ -5,7 +5,9 @@ from .agent import AgentRole, AgentResponse
 from .consensus import DecisionResult, ConsensusThresholds
 from .session import SessionStatus, RoundResult, DevSession
 from .project import Project
-from .code_task import CodeOperation, CodeTaskType, CodeChange, CodeResult, CodeContext
+from .code_task import (
+    CodeOperation, CodeTaskType, CodeChange, CodeResult, CodeContext, ClaudeCodeResult
+)
 
 __all__ = [
     "CrossScore",
@@ -23,4 +25,5 @@ __all__ = [
     "CodeChange",
     "CodeResult",
     "CodeContext",
+    "ClaudeCodeResult",
 ]

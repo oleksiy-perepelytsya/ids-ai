@@ -1,12 +1,15 @@
 """Telegram bot handlers for commands and messages"""
 
 import uuid
-from datetime import datetime
+from pathlib import Path
+from typing import Optional
+
 from telegram import Update
 from telegram.ext import ContextTypes
 from telegram.constants import ChatAction, ParseMode
 from ids.models import Project, SessionStatus
 from ids.orchestrator import SessionManager
+from ids.orchestrator.code_workflow import CodeWorkflow
 from ids.storage import MongoProjectStore
 from ids.interfaces.telegram.formatters import TelegramFormatter
 from ids.interfaces.telegram.keyboards import TelegramKeyboards
@@ -18,24 +21,26 @@ logger = get_logger(__name__)
 
 class TelegramHandlers:
     """Handlers for Telegram bot commands and messages"""
-    
+
     def __init__(
         self,
         session_manager: SessionManager,
-        project_store: MongoProjectStore
+        project_store: MongoProjectStore,
+        code_workflow: Optional[CodeWorkflow] = None,
     ):
         self.session_manager = session_manager
         self.project_store = project_store
+        self.code_workflow = code_workflow
         self.formatter = TelegramFormatter()
         self.keyboards = TelegramKeyboards()
-        
+
         # Track active projects per user
         self.user_projects = {}  # user_id -> project_name
-        
+
         # UI States
         self.awaiting_comment = {}  # user_id -> True
         self.awaiting_learn = {}    # user_id -> True
-        
+
         logger.info("telegram_handlers_initialized")
     
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -479,6 +484,10 @@ class TelegramHandlers:
                         "Please provide new direction or clarification."
                     )
         
+        elif data.startswith("implement:"):
+            session_id = data.split(":", 1)[1]
+            await self._handle_implement(query, context, user_id, session_id)
+
         elif data.startswith("session:"):
             action = data.split(":")[1]
             
@@ -498,13 +507,13 @@ class TelegramHandlers:
     
     async def cmd_code(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
-        Handle /code command for code generation/modification.
-        
+        Handle /code command for direct code implementation.
+
         Usage: /code <description>
         Example: /code Add a function to calculate shipping cost
         """
         user_id = update.effective_user.id
-        
+
         # Get active project
         project_name = self.user_projects.get(user_id)
         if not project_name:
@@ -512,43 +521,49 @@ class TelegramHandlers:
                 "⚠️ No active project. Use /project <name> first."
             )
             return
-        
+
+        if not self.code_workflow:
+            await update.message.reply_text("⚠️ Code workflow is not configured.")
+            return
+
+        if not settings.claude_code_enabled:
+            await update.message.reply_text("⚠️ Claude Code integration is disabled.")
+            return
+
         # Get task description
         text = update.message.text
         task_desc = text.replace('/code', '').strip()
-        
+
         if not task_desc:
             await update.message.reply_text(
                 "📝 Usage: /code <description>\n\n"
                 "Example: /code Add Redis caching to vessel.py"
             )
             return
-        
+
+        project_path = Path(settings.projects_root) / project_name
+        if not project_path.exists():
+            await update.message.reply_text(
+                f"⚠️ Project directory not found: {project_path}"
+            )
+            return
+
         await update.message.reply_text(
-            f"🏛️ Starting code generation for: {task_desc}\n\n"
-            "This will:\n"
-            "1️⃣ Parliament deliberates on approach\n"
-            "2️⃣ Generate Python code\n"
-            "3️⃣ Validate syntax/types/lint\n"
-            "4️⃣ Present for approval\n\n"
-            "⏳ Starting deliberation..."
+            f"🚀 *Implementing:* {self.formatter.escape_markdown(task_desc)}\n\n"
+            "Claude Code is working on it...",
+            parse_mode=ParseMode.MARKDOWN,
         )
-        
-        # Create session with code task marker
-        session_id = f"sess_{uuid.uuid4().hex[:8]}"
-        # This would integrate with code workflow
-        # For now, notify that feature is being prepared
-        
-        await update.message.reply_text(
-            "🚧 Code generation workflow is ready!\n\n"
-            "The system will:\n"
-            "✅ Deliberate on approach\n"
-            "✅ Generate Python code\n"
-            "✅ Validate all changes\n"
-            "✅ Backup before writing\n"
-            "✅ Rollback if validation fails\n\n"
-            "Full integration coming in next deployment."
-        )
+
+        chat_id = update.effective_chat.id
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
+        try:
+            result = await self.code_workflow.implement_direct(task_desc, project_path)
+            msg = self.formatter.format_implementation_result(result)
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error("code_command_error", error=str(e))
+            await update.message.reply_text(f"❌ Error: {str(e)}")
     
     async def cmd_analyze(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -729,6 +744,44 @@ class TelegramHandlers:
         except Exception as e:
             logger.error("export_failed", error=str(e), session_id=session.session_id if session else "unknown")
             await update.message.reply_text(f"❌ Export failed: {str(e)}")
+    async def _handle_implement(self, query, context, user_id: int, session_id: str):
+        """Handle implementation request after consensus"""
+        if not self.code_workflow or not settings.claude_code_enabled:
+            await query.edit_message_text("⚠️ Claude Code integration is not available.")
+            return
+
+        project_name = self.user_projects.get(user_id)
+        if not project_name:
+            await query.edit_message_text("⚠️ No active project selected.")
+            return
+
+        project_path = Path(settings.projects_root) / project_name
+        if not project_path.exists():
+            await query.edit_message_text(f"⚠️ Project directory not found: {project_path}")
+            return
+
+        session = await self.session_manager.session_store.get_session(session_id)
+        if not session:
+            await query.edit_message_text("⚠️ Session not found.")
+            return
+
+        await query.edit_message_text(
+            "🚀 *Implementing consensus...*\n\n"
+            "Claude Code is working on it...",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+        await context.bot.send_chat_action(
+            chat_id=query.message.chat_id, action=ChatAction.TYPING
+        )
+
+        try:
+            result = await self.code_workflow.implement_from_consensus(session, project_path)
+            msg = self.formatter.format_implementation_result(result)
+            await query.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+        except Exception as e:
+            logger.error("implement_error", error=str(e), session_id=session_id)
+            await query.message.reply_text(f"❌ Implementation error: {str(e)}")
+
     async def _handle_continuation(self, query, session):
         """Handle session continuation after pause"""
         await query.edit_message_text("⏳ Continuing deliberation...")
@@ -758,9 +811,20 @@ class TelegramHandlers:
             
         if session.status == SessionStatus.CONSENSUS:
             result_msg = self.formatter.format_consensus_decision(session)
+            # Show "Implement" button if code workflow is available
+            reply_markup = None
+            if self.code_workflow and settings.claude_code_enabled:
+                project_name = self.user_projects.get(
+                    session.telegram_user_id
+                )
+                if project_name:
+                    reply_markup = self.keyboards.consensus_keyboard(
+                        session.session_id
+                    )
             await target.reply_text(
                 result_msg,
-                parse_mode=ParseMode.MARKDOWN
+                parse_mode=ParseMode.MARKDOWN,
+                reply_markup=reply_markup,
             )
         elif session.status == SessionStatus.DEAD_END:
             dead_end_msg = self.formatter.format_dead_end(session)

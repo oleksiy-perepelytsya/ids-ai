@@ -1,5 +1,7 @@
 """Telegram bot initialization and setup"""
 
+from typing import Optional
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -8,6 +10,7 @@ from telegram.ext import (
     filters
 )
 from ids.orchestrator import SessionManager
+from ids.orchestrator.code_workflow import CodeWorkflow
 from ids.storage import MongoProjectStore
 from ids.interfaces.telegram.handlers import TelegramHandlers
 from ids.config import settings
@@ -18,23 +21,25 @@ logger = get_logger(__name__)
 
 def create_bot(
     session_manager: SessionManager,
-    project_store: MongoProjectStore
+    project_store: MongoProjectStore,
+    code_workflow: Optional[CodeWorkflow] = None,
 ) -> Application:
     """
     Create and configure Telegram bot application.
-    
+
     Args:
         session_manager: Session manager for deliberation
         project_store: Project storage
-        
+        code_workflow: Code workflow for implementation
+
     Returns:
         Configured Application ready to run
     """
     # Create application
     app = Application.builder().token(settings.telegram_bot_token).build()
-    
+
     # Create handlers instance
-    handlers = TelegramHandlers(session_manager, project_store)
+    handlers = TelegramHandlers(session_manager, project_store, code_workflow)
     
     # Register command handlers
     app.add_handler(CommandHandler("start", handlers.cmd_start))

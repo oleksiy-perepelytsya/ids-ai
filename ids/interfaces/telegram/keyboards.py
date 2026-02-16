@@ -49,6 +49,17 @@ class TelegramKeyboards:
         return InlineKeyboardMarkup(keyboard)
     
     @staticmethod
+    def consensus_keyboard(session_id: str) -> InlineKeyboardMarkup:
+        """Keyboard shown after consensus with option to implement"""
+        keyboard = [
+            [InlineKeyboardButton(
+                "🚀 Implement",
+                callback_data=f"implement:{session_id}"
+            )],
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    @staticmethod
     def session_continue_keyboard() -> InlineKeyboardMarkup:
         """Keyboard for continuing a session"""
         keyboard = [

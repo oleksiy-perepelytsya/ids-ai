@@ -4,10 +4,11 @@ import asyncio
 import sys
 from ids.utils import setup_logging, get_logger
 from ids.config import settings
-from ids.services import LLMClient
+from ids.services import LLMClient, ClaudeCodeExecutor
 from ids.storage import MongoSessionStore, MongoProjectStore, ChromaStore
 from ids.agents import create_all_agents
 from ids.orchestrator import ConsensusBuilder, RoundExecutor, SessionManager
+from ids.orchestrator.code_workflow import CodeWorkflow
 from ids.interfaces.telegram import create_bot
 
 logger = get_logger(__name__)
@@ -49,10 +50,15 @@ async def main():
             project_store=project_store,
             chroma_store=chroma_store
         )
-        
+
+        # Initialize Claude Code integration
+        logger.info("initializing_claude_code")
+        claude_executor = ClaudeCodeExecutor()
+        code_workflow = CodeWorkflow(claude_executor=claude_executor)
+
         # Create Telegram bot
         logger.info("initializing_telegram_bot")
-        app = create_bot(session_manager, project_store)
+        app = create_bot(session_manager, project_store, code_workflow)
         
         # Start bot
         logger.info("starting_telegram_bot")

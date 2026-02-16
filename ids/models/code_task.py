@@ -45,3 +45,14 @@ class CodeContext(BaseModel):
     target_files: List[str] = Field(default_factory=list, description="Files to operate on")
     related_files: List[str] = Field(default_factory=list, description="Related files for context")
     task_description: str = Field(description="What to do")
+
+
+class ClaudeCodeResult(BaseModel):
+    """Result from Claude Code CLI execution"""
+    success: bool = Field(description="Whether execution succeeded")
+    result_text: str = Field(default="", description="Claude's response text")
+    cost_usd: float = Field(default=0.0, description="API cost in USD")
+    num_turns: int = Field(default=0, description="Number of agentic turns used")
+    session_id: str = Field(default="", description="Claude Code session ID for resume")
+    error_message: Optional[str] = Field(default=None, description="Error if failed")
+    duration_ms: int = Field(default=0, description="Execution duration in milliseconds")
