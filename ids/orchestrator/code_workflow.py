@@ -115,39 +115,27 @@ class CodeWorkflow:
 
         last_round = session.rounds[-1]
 
-        # Generalist framing
+        # Generalist synthesis
         if last_round.generalist_response:
             parts.append(
-                f"# Agreed Approach (Generalist Summary)\n"
-                f"{last_round.generalist_response.raw_response}\n"
+                f"# Agreed Approach ({last_round.generalist_response.role_name} Synthesis)\n"
+                f"{last_round.generalist_response.response}\n"
             )
 
-        # Key agent proposals
+        # Specialist perspectives
         proposals = []
         for resp in last_round.agent_responses:
-            if resp.proposed_approach:
+            if resp.response:
                 proposals.append(
-                    f"**{resp.agent_id}**: {resp.proposed_approach}"
+                    f"**{resp.role_name}**: {resp.response}"
                 )
         if proposals:
-            parts.append("# Agent Proposals\n" + "\n\n".join(proposals) + "\n")
+            parts.append("# Specialist Perspectives\n" + "\n\n".join(proposals) + "\n")
 
         # Decision reasoning
         if last_round.decision_reasoning:
             parts.append(
                 f"# Consensus Reasoning\n{last_round.decision_reasoning}\n"
-            )
-
-        # Key concerns to keep in mind
-        all_concerns = []
-        for resp in last_round.agent_responses:
-            all_concerns.extend(resp.concerns)
-        if all_concerns:
-            unique = list(dict.fromkeys(all_concerns))[:10]
-            parts.append(
-                "# Key Concerns to Address\n"
-                + "\n".join(f"- {c}" for c in unique)
-                + "\n"
             )
 
         parts.append(

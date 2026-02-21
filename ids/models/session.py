@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
 from .agent import AgentResponse
-from .cross import CrossScore, MergedCross
+from .cross import MergedCross
 from .consensus import DecisionResult
 
 
@@ -24,24 +24,23 @@ class SessionStatus(str, Enum):
 class RoundResult(BaseModel):
     """Results from a single deliberation round"""
     round_number: int = Field(description="Round number (1-indexed)")
-    
-    # Generalist's input to this round
-    generalist_prompt: str = Field(description="Prompt sent by generalist to parliament")
-    generalist_response: AgentResponse = Field(description="Generalist's full response")
-    generalist_cross: CrossScore = Field(description="Generalist's initial CROSS score (duplicated from response)")
-    
-    # Parliament member responses
-    agent_responses: List[AgentResponse] = Field(description="All agent responses")
-    
+
+    # Summary of what was deliberated this round
+    generalist_prompt: str = Field(description="Summary of round task/context sent to parliament")
+    generalist_response: AgentResponse = Field(description="Generalist's synthesis response")
+
+    # Specialist responses
+    agent_responses: List[AgentResponse] = Field(description="All specialist agent responses")
+
     # Aggregated results
-    merged_cross: MergedCross = Field(description="Merged CROSS from all agents")
+    merged_cross: MergedCross = Field(description="Merged CROSS from all agents including generalist")
     decision: DecisionResult = Field(description="Round outcome decision")
-    
+
     # Decision reasoning
     decision_reasoning: str = Field(default="", description="Why this decision was made")
-    
+
     timestamp: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
@@ -53,27 +52,28 @@ class DevSession(BaseModel):
     session_id: str = Field(description="Unique session identifier")
     telegram_user_id: int = Field(description="Telegram user who created session")
     telegram_chat_id: int = Field(description="Telegram chat ID")
-    project_name: Optional[str] = Field(default=None, description="Project context")
-    
+    project_id: str = Field(description="Project ID this session belongs to")
+    project_name: Optional[str] = Field(default=None, description="Project name (display only)")
+
     task: str = Field(description="User's question/task")
     context: str = Field(default="", description="Additional context and user guidance")
-    
+
     rounds: List[RoundResult] = Field(default_factory=list, description="Deliberation rounds")
     status: SessionStatus = Field(default=SessionStatus.PENDING)
-    
+
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
-    
+
     def add_round(self, round_result: RoundResult) -> None:
         """Add a round result to session"""
         self.rounds.append(round_result)
         self.updated_at = datetime.utcnow()
-    
+
     def get_current_round_number(self) -> int:
         """Get next round number"""
         return len(self.rounds) + 1

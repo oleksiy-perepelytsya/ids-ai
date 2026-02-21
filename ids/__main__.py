@@ -6,8 +6,7 @@ from ids.utils import setup_logging, get_logger
 from ids.config import settings
 from ids.services import LLMClient, ClaudeCodeExecutor
 from ids.storage import MongoSessionStore, MongoProjectStore, ChromaStore
-from ids.agents import create_all_agents
-from ids.orchestrator import ConsensusBuilder, RoundExecutor, SessionManager
+from ids.orchestrator import ConsensusBuilder, SessionManager
 from ids.orchestrator.code_workflow import CodeWorkflow
 from ids.interfaces.telegram import create_bot
 
@@ -16,36 +15,31 @@ logger = get_logger(__name__)
 
 async def main():
     """Initialize and start IDS application"""
-    
+
     # Setup logging
     setup_logging()
-    logger.info("ids_starting", version="0.1.0")
-    
+    logger.info("ids_starting", version="0.2.0")
+
     try:
         # Initialize LLM client
         logger.info("initializing_llm_client")
         llm_client = LLMClient()
-        
+
         # Initialize storage
         logger.info("initializing_storage")
         session_store = MongoSessionStore()
         project_store = MongoProjectStore()
         chroma_store = ChromaStore()
-        
+
         # Initialize ChromaDB with async method
         await chroma_store.initialize()
-        
-        # Initialize agents
-        logger.info("initializing_agents")
-        agents = create_all_agents(llm_client)
-        logger.info("agents_created", count=len(agents))
-        
+
         # Initialize orchestrator
         logger.info("initializing_orchestrator")
         consensus_builder = ConsensusBuilder()
-        round_executor = RoundExecutor(agents, consensus_builder, chroma_store)
         session_manager = SessionManager(
-            round_executor=round_executor,
+            llm_client=llm_client,
+            consensus_builder=consensus_builder,
             session_store=session_store,
             project_store=project_store,
             chroma_store=chroma_store
@@ -59,13 +53,8 @@ async def main():
         # Create Telegram bot
         logger.info("initializing_telegram_bot")
         app = create_bot(session_manager, project_store, code_workflow)
-        
+
         # Start bot
-        logger.info("starting_telegram_bot")
-        
-        # Log enabled agents
-        enabled_agents = [role.value for role in settings.get_enabled_agents()]
-        
         logger.info(
             "ids_ready",
             allowed_users=len(settings.get_allowed_users()),
@@ -73,17 +62,16 @@ async def main():
             round_logging=settings.round_logging,
             agent_execution_mode="parallel" if settings.parallel_agents else "sequential",
             agent_delay_seconds=settings.agent_delay_seconds,
-            total_agents=len(agents),
-            enabled_specialists=enabled_agents
+            parliament="dynamic_per_project"
         )
-        
+
         # Run polling
         await app.initialize()
         await app.start()
         await app.updater.start_polling()
-        
+
         logger.info("telegram_bot_running")
-        
+
         # Keep running
         try:
             await asyncio.Event().wait()
@@ -93,7 +81,7 @@ async def main():
             await app.updater.stop()
             await app.stop()
             await app.shutdown()
-    
+
     except Exception as e:
         logger.error("startup_failed", error=str(e), exc_info=True)
         sys.exit(1)

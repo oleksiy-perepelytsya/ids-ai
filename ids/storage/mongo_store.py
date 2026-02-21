@@ -12,12 +12,12 @@ logger = get_logger(__name__)
 
 class MongoSessionStore(BaseSessionStore):
     """MongoDB implementation of session storage"""
-    
+
     def __init__(self):
         self.client = AsyncIOMotorClient(settings.mongodb_uri)
         self.db = self.client[settings.mongodb_db]
         self.sessions = self.db.sessions
-        
+
     async def create_session(self, session: DevSession) -> DevSession:
         """Create new session"""
         session_dict = session.model_dump()
@@ -28,7 +28,7 @@ class MongoSessionStore(BaseSessionStore):
             user_id=session.telegram_user_id
         )
         return session
-    
+
     async def get_session(self, session_id: str) -> Optional[DevSession]:
         """Get session by ID"""
         doc = await self.sessions.find_one({"session_id": session_id})
@@ -36,7 +36,7 @@ class MongoSessionStore(BaseSessionStore):
             doc.pop("_id", None)  # Remove MongoDB ID
             return DevSession(**doc)
         return None
-    
+
     async def update_session(self, session: DevSession) -> DevSession:
         """Update existing session"""
         session_dict = session.model_dump()
@@ -50,28 +50,33 @@ class MongoSessionStore(BaseSessionStore):
             status=session.status
         )
         return session
-    
+
     async def get_user_sessions(
-        self, 
-        telegram_user_id: int, 
+        self,
+        telegram_user_id: int,
+        project_id: str,
         limit: int = 10
     ) -> List[DevSession]:
-        """Get recent sessions for user"""
+        """Get recent sessions for user filtered by project"""
         cursor = self.sessions.find(
-            {"telegram_user_id": telegram_user_id}
+            {
+                "telegram_user_id": telegram_user_id,
+                "project_id": project_id
+            }
         ).sort("created_at", -1).limit(limit)
-        
+
         sessions = []
         async for doc in cursor:
             doc.pop("_id", None)
             sessions.append(DevSession(**doc))
-        
+
         return sessions
-    
-    async def get_active_session(self, telegram_user_id: int) -> Optional[DevSession]:
-        """Get user's currently active session"""
+
+    async def get_active_session(self, telegram_user_id: int, project_id: str) -> Optional[DevSession]:
+        """Get user's currently active session for a project"""
         doc = await self.sessions.find_one({
             "telegram_user_id": telegram_user_id,
+            "project_id": project_id,
             "status": {"$in": [
                 SessionStatus.PENDING,
                 SessionStatus.CLARIFYING,
@@ -80,7 +85,7 @@ class MongoSessionStore(BaseSessionStore):
                 SessionStatus.DEAD_END
             ]}
         })
-        
+
         if doc:
             doc.pop("_id", None)
             return DevSession(**doc)
@@ -89,12 +94,12 @@ class MongoSessionStore(BaseSessionStore):
 
 class MongoProjectStore(BaseProjectStore):
     """MongoDB implementation of project storage"""
-    
+
     def __init__(self):
         self.client = AsyncIOMotorClient(settings.mongodb_uri)
         self.db = self.client[settings.mongodb_db]
         self.projects = self.db.projects
-    
+
     async def create_project(self, project: Project) -> Project:
         """Create new project"""
         project_dict = project.model_dump()
@@ -106,7 +111,7 @@ class MongoProjectStore(BaseProjectStore):
             user_id=project.telegram_user_id
         )
         return project
-    
+
     async def get_project(self, project_id: str) -> Optional[Project]:
         """Get project by ID"""
         doc = await self.projects.find_one({"project_id": project_id})
@@ -114,10 +119,10 @@ class MongoProjectStore(BaseProjectStore):
             doc.pop("_id", None)
             return Project(**doc)
         return None
-    
+
     async def get_project_by_name(
-        self, 
-        name: str, 
+        self,
+        name: str,
         telegram_user_id: int
     ) -> Optional[Project]:
         """Get project by name for specific user"""
@@ -129,20 +134,20 @@ class MongoProjectStore(BaseProjectStore):
             doc.pop("_id", None)
             return Project(**doc)
         return None
-    
+
     async def get_user_projects(self, telegram_user_id: int) -> List[Project]:
         """Get all projects for user"""
         cursor = self.projects.find(
             {"telegram_user_id": telegram_user_id}
         ).sort("name", 1)
-        
+
         projects = []
         async for doc in cursor:
             doc.pop("_id", None)
             projects.append(Project(**doc))
-        
+
         return projects
-    
+
     async def update_project(self, project: Project) -> Project:
         """Update existing project"""
         project_dict = project.model_dump()

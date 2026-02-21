@@ -1,7 +1,7 @@
 """IDS data models"""
 
 from .cross import CrossScore, MergedCross
-from .agent import AgentRole, AgentResponse
+from .agent import AgentResponse, ROLE_GENERALIST, ROLE_SOURCER
 from .consensus import DecisionResult, ConsensusThresholds
 from .session import SessionStatus, RoundResult, DevSession
 from .project import Project
@@ -12,7 +12,8 @@ from .code_task import (
 __all__ = [
     "CrossScore",
     "MergedCross",
-    "AgentRole",
+    "ROLE_GENERALIST",
+    "ROLE_SOURCER",
     "AgentResponse",
     "DecisionResult",
     "ConsensusThresholds",
