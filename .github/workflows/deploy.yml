@@ -83,7 +83,7 @@ jobs:
             docker compose down
             
             # Start with the new image
-            docker compose up -d
+            docker compose up -d --force-recreate
             
             # Clean up old images
             docker image prune -af
