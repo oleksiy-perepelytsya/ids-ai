@@ -1,9 +1,7 @@
 """ChromaDB storage for codebase and pattern caching"""
 
 import chromadb
-import socket
 import asyncio
-import httpx
 from typing import List, Dict, Optional
 from ids.config import settings
 from ids.utils import get_logger
@@ -41,12 +39,26 @@ class ChromaStore:
         """Get or create a collection"""
         if not self.client:
             raise Exception("ChromaDB client not initialized. Call initialize() first.")
-        
+
+        collection_metadata = metadata or {"hnsw:space": "cosine"}
+
         try:
             return self.client.get_or_create_collection(
                 name=name,
-                metadata=metadata or {"hnsw:space": "cosine"}
+                metadata=collection_metadata
             )
+        except KeyError as e:
+            if "_type" in str(e):
+                # ChromaDB version mismatch: existing collection lacks '_type' in its
+                # embedding function metadata. Delete and recreate it.
+                logger.warning("collection_type_mismatch_recreating", name=name)
+                try:
+                    self.client.delete_collection(name=name)
+                except Exception:
+                    pass
+                return self.client.create_collection(name=name, metadata=collection_metadata)
+            logger.error("collection_get_or_create_failed", name=name, error=str(e))
+            raise
         except Exception as e:
             logger.error("collection_get_or_create_failed", name=name, error=str(e))
             raise
@@ -171,24 +183,28 @@ class ChromaStore:
     ) -> None:
         """
         Add a learning pattern (feedback or text insight) to ChromaDB.
-        
+
         Args:
             project_id: Project identifier
             content: The text to learn
             metadata: Optional additional metadata
         """
-        collection_name = f"learning_{project_id}"
-        collection = self.get_or_create_collection(collection_name)
-        
-        import uuid
-        pattern_id = f"pattern_{uuid.uuid4().hex[:8]}"
-        
-        collection.add(
-            documents=[content],
-            metadatas=[metadata or {"project_id": project_id, "type": "learning"}],
-            ids=[pattern_id]
-        )
-        logger.info("learning_pattern_added", project_id=project_id, pattern_id=pattern_id)
+        try:
+            collection_name = f"learning_{project_id}"
+            collection = self.get_or_create_collection(collection_name)
+
+            import uuid
+            pattern_id = f"pattern_{uuid.uuid4().hex[:8]}"
+
+            collection.add(
+                documents=[content],
+                metadatas=[metadata or {"project_id": project_id, "source": "learning"}],
+                ids=[pattern_id]
+            )
+            logger.info("learning_pattern_added", project_id=project_id, pattern_id=pattern_id)
+        except Exception as e:
+            # Non-fatal: learning failure must not block deliberation or user flows
+            logger.error("add_learning_pattern_failed", project_id=project_id, error=str(e))
 
     async def search_learning_patterns(
         self,

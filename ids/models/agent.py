@@ -12,13 +12,13 @@ ROLE_SOURCER = "sourcer"
 class AgentResponse(BaseModel):
     """Response from a single agent during deliberation round"""
     agent_id: str = Field(description="Agent role identifier (e.g. 'generalist', 'specialist_1')")
-    role_name: str = Field(description="Human-readable role name extracted from prompt '# Role:' header")
+    role_name: str = Field(default="", description="Human-readable role name extracted from prompt '# Role:' header")
 
     # CROSS scoring
     cross_score: CrossScore = Field(description="CROSS scoring")
 
     # Single free-text response field
-    response: str = Field(description="Agent's full free-text analysis and recommendation")
+    response: str = Field(default="", description="Agent's full free-text analysis and recommendation")
 
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
