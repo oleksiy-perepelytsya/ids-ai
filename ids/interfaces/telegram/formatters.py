@@ -125,33 +125,34 @@ class TelegramFormatter:
     @staticmethod
     def format_project_info(project: Project, session_count: int = 0, last_session_date: str = "") -> str:
         """Format detailed project info for /project_info command"""
+        esc = TelegramFormatter.escape_markdown
         specialist_count = len(project.specialist_prompt_urls)
 
         msg_parts = [
-            f"📂 *Project: {project.name}* (`{project.project_id}`)\n",
+            f"📂 *Project: {esc(project.name)}* (`{project.project_id}`)\n",
             "━━━━━━━━━━━━━━━━━━━━\n",
         ]
 
         if project.description:
-            msg_parts.append(f"Description: {project.description}\n")
+            msg_parts.append(f"Description: {esc(project.description)}\n")
 
         msg_parts.append(f"\n*Parliament ({specialist_count} specialists):*\n")
 
         if specialist_count == 0:
-            msg_parts.append("  No specialists configured yet.\n")
+            msg_parts.append("  No specialists configured yet\\.\n")
         else:
             for key in sorted(project.specialist_prompt_urls.keys(), key=int):
                 url = project.specialist_prompt_urls[key]
-                msg_parts.append(f"• specialist_{key}: {url}\n")
+                msg_parts.append(f"• specialist\\_{key}: `{url}`\n")
 
         msg_parts.append("\n*Roles:*\n")
         if project.generalist_prompt_url:
-            msg_parts.append(f"• Generalist: {project.generalist_prompt_url} [max {project.generalist_max_tokens} tokens]\n")
+            msg_parts.append(f"• Generalist: `{project.generalist_prompt_url}` [max {project.generalist_max_tokens} tokens]\n")
         else:
             msg_parts.append(f"• Generalist: using default [max {project.generalist_max_tokens} tokens]\n")
 
         if project.sourcer_prompt_url:
-            msg_parts.append(f"• Sourcer: {project.sourcer_prompt_url} [max {project.sourcer_max_tokens} tokens]\n")
+            msg_parts.append(f"• Sourcer: `{project.sourcer_prompt_url}` [max {project.sourcer_max_tokens} tokens]\n")
         else:
             msg_parts.append(f"• Sourcer: using default [max {project.sourcer_max_tokens} tokens]\n")
 

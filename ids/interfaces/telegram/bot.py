@@ -2,11 +2,13 @@
 
 from typing import Optional
 
+from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
+    ContextTypes,
     filters
 )
 from ids.orchestrator import SessionManager
@@ -17,6 +19,19 @@ from ids.config import settings
 from ids.utils import get_logger
 
 logger = get_logger(__name__)
+
+
+async def _error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Surface unhandled handler exceptions to the user instead of silently discarding them."""
+    error = context.error
+    logger.error("unhandled_handler_error", error=str(error), exc_info=error)
+    if isinstance(update, Update) and update.effective_message:
+        try:
+            await update.effective_message.reply_text(
+                f"❌ Internal error ({type(error).__name__}): {str(error)[:400]}"
+            )
+        except Exception:
+            pass
 
 
 def create_bot(
@@ -67,6 +82,9 @@ def create_bot(
 
     # Register callback query handler (for inline buttons)
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
+
+    # Register error handler — surfaces all handler exceptions to the user
+    app.add_error_handler(_error_handler)
 
     logger.info("telegram_bot_created", bot_token=settings.telegram_bot_token[:10] + "...")
 

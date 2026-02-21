@@ -47,19 +47,16 @@ class ChromaStore:
                 name=name,
                 metadata=collection_metadata
             )
-        except KeyError as e:
+        except Exception as e:
             if "_type" in str(e):
                 # ChromaDB version mismatch: existing collection lacks '_type' in its
                 # embedding function metadata. Delete and recreate it.
-                logger.warning("collection_type_mismatch_recreating", name=name)
+                logger.warning("collection_type_mismatch_recreating", name=name, error=str(e))
                 try:
                     self.client.delete_collection(name=name)
                 except Exception:
                     pass
                 return self.client.create_collection(name=name, metadata=collection_metadata)
-            logger.error("collection_get_or_create_failed", name=name, error=str(e))
-            raise
-        except Exception as e:
             logger.error("collection_get_or_create_failed", name=name, error=str(e))
             raise
     

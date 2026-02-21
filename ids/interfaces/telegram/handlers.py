@@ -329,7 +329,9 @@ class TelegramHandlers:
                 role_id = f"specialist_{key}"
                 agent = agents.get(role_id)
                 if agent:
-                    role_lines.append(f"• specialist_{key} → *{agent.role_name}*")
+                    role_lines.append(
+                        f"• specialist\\_{key} → *{self.formatter.escape_markdown(agent.role_name)}*"
+                    )
             if role_lines:
                 msg += "\n*Loaded Role Names:*\n" + "\n".join(role_lines) + "\n"
 
@@ -549,19 +551,9 @@ class TelegramHandlers:
                 )
             return
 
-        # No active session
+        # No active session — all text messages start deliberation
         if not text.startswith("/"):
-            if text.strip().endswith("?"):
-                # Start deliberation
-                await self._start_deliberation(update, context, text, project)
-            else:
-                # Add to knowledge
-                await self.session_manager.learn_from_text(project.project_id, text)
-                await update.message.reply_text(
-                    f"📚 Knowledge captured for project *{project.name}*.\n"
-                    "I will use this information in future deliberations.",
-                    parse_mode=ParseMode.MARKDOWN
-                )
+            await self._start_deliberation(update, context, text, project)
 
     async def _start_deliberation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, project: Project):
         """Internal helper to start deliberation"""
