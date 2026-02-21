@@ -79,9 +79,6 @@ jobs:
             # Pull the pre-built image
             docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
             
-            # Stop and remove old containers
-            docker compose down
-            
             # Start with the new image
             docker compose up -d --force-recreate
             
