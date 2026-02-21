@@ -3,7 +3,7 @@ version: '3.8'
 services:
   ids:
     # Use pre-built image from GitHub Container Registry
-    image: ghcr.io/${GITHUB_REPOSITORY:-oleksiy-perepelytsya/ids-ai}:${IMAGE_TAG:-latest}
+    image: ghcr.io/oleksiy-perepelytsya/ids-ai:latest
     container_name: ids-app
     env_file:
       - .env
