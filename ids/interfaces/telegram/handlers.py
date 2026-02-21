@@ -429,6 +429,48 @@ class TelegramHandlers:
 
         logger.info("prompts_updated", user_id=user_id, project_id=project.project_id, role=role_label)
 
+    async def cmd_delete_project(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle /delete_project command — shows confirmation before wiping all data."""
+        user_id = update.effective_user.id
+
+        if not context.args:
+            await update.message.reply_text(
+                "Usage: `/delete_project <name>`\n\n"
+                "This removes the project, all its sessions, and all ChromaDB data.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        project_name = context.args[0]
+        project = await self.project_store.get_project_by_name(project_name, user_id)
+        if not project:
+            await update.message.reply_text(f"⚠️ Project '{project_name}' not found.")
+            return
+
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        keyboard = InlineKeyboardMarkup([
+            [InlineKeyboardButton(
+                "🗑️ Yes, delete everything",
+                callback_data=f"delete_project:confirm:{project.project_id}"
+            )],
+            [InlineKeyboardButton(
+                "❌ Cancel",
+                callback_data=f"delete_project:cancel:{project.project_id}"
+            )],
+        ])
+
+        specialist_count = len(project.specialist_prompt_urls)
+        await update.message.reply_text(
+            f"⚠️ *Delete project '{project_name}'?*\n\n"
+            f"This will permanently remove:\n"
+            f"• The project and its {specialist_count} specialist prompt(s)\n"
+            f"• All deliberation sessions\n"
+            f"• All ChromaDB learning data\n\n"
+            f"*This cannot be undone.*",
+            parse_mode=ParseMode.MARKDOWN,
+            reply_markup=keyboard
+        )
+
     async def cmd_status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /status command"""
         user_id = update.effective_user.id
@@ -642,6 +684,33 @@ class TelegramHandlers:
 
         data = query.data
         user_id = update.effective_user.id
+
+        if data.startswith("delete_project:"):
+            parts = data.split(":", 2)
+            action, project_id = parts[1], parts[2]
+
+            if action == "cancel":
+                await query.edit_message_text("❌ Deletion cancelled.")
+
+            elif action == "confirm":
+                await query.edit_message_text("🗑️ Deleting project data...")
+                try:
+                    summary = await self.session_manager.delete_project(project_id)
+                    # Clear from active project cache for all users
+                    for uid, proj in list(self.user_projects.items()):
+                        if proj.project_id == project_id:
+                            del self.user_projects[uid]
+                    await query.edit_message_text(
+                        f"✅ *Project deleted*\n\n"
+                        f"• Sessions removed: {summary['sessions_deleted']}\n"
+                        f"• ChromaDB collections cleared\n\n"
+                        f"Use /register\\_project to start fresh.",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                except Exception as e:
+                    logger.error("project_delete_error", error=str(e))
+                    await query.edit_message_text(f"❌ Delete failed: {str(e)}")
+            return
 
         if data.startswith("dead_end:"):
             action = data.split(":")[1]

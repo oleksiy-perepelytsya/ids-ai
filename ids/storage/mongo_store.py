@@ -72,6 +72,12 @@ class MongoSessionStore(BaseSessionStore):
 
         return sessions
 
+    async def delete_project_sessions(self, project_id: str) -> int:
+        """Delete all sessions for a project"""
+        result = await self.sessions.delete_many({"project_id": project_id})
+        logger.info("project_sessions_deleted", project_id=project_id, count=result.deleted_count)
+        return result.deleted_count
+
     async def get_active_session(self, telegram_user_id: int, project_id: str) -> Optional[DevSession]:
         """Get user's currently active session for a project"""
         doc = await self.sessions.find_one({
@@ -147,6 +153,12 @@ class MongoProjectStore(BaseProjectStore):
             projects.append(Project(**doc))
 
         return projects
+
+    async def delete_project(self, project_id: str) -> bool:
+        """Delete a project document"""
+        result = await self.projects.delete_one({"project_id": project_id})
+        logger.info("project_deleted", project_id=project_id)
+        return result.deleted_count > 0
 
     async def update_project(self, project: Project) -> Project:
         """Update existing project"""

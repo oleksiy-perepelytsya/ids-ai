@@ -203,6 +203,16 @@ class ChromaStore:
             # Non-fatal: learning failure must not block deliberation or user flows
             logger.error("add_learning_pattern_failed", project_id=project_id, error=str(e))
 
+    async def delete_project_data(self, project_id: str) -> None:
+        """Delete all ChromaDB collections for a project."""
+        for collection_name in [f"learning_{project_id}", f"codebase_{project_id}"]:
+            try:
+                self.client.delete_collection(name=collection_name)
+                logger.info("chroma_collection_deleted", name=collection_name)
+            except Exception as e:
+                # Collection may not exist — that's fine
+                logger.info("chroma_collection_not_found_skip", name=collection_name, error=str(e))
+
     async def search_learning_patterns(
         self,
         project_id: str,

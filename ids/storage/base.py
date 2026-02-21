@@ -38,6 +38,11 @@ class BaseSessionStore(ABC):
         """Get user's currently active session for a project"""
         pass
 
+    @abstractmethod
+    async def delete_project_sessions(self, project_id: str) -> int:
+        """Delete all sessions for a project. Returns count deleted."""
+        pass
+
 
 class BaseProjectStore(ABC):
     """Abstract interface for project storage"""
@@ -69,4 +74,9 @@ class BaseProjectStore(ABC):
     @abstractmethod
     async def update_project(self, project: Project) -> Project:
         """Update existing project"""
+        pass
+
+    @abstractmethod
+    async def delete_project(self, project_id: str) -> bool:
+        """Delete a project. Returns True if deleted."""
         pass

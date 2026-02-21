@@ -226,6 +226,26 @@ class SessionManager:
         logger.info("session_cancelled", session_id=session_id)
         return session
 
+    async def delete_project(self, project_id: str) -> dict:
+        """
+        Delete a project and all its data from every store.
+        Returns a summary of what was deleted.
+        """
+        self.invalidate_agent_cache(project_id)
+
+        sessions_deleted = await self.session_store.delete_project_sessions(project_id)
+        project_deleted = await self.project_store.delete_project(project_id)
+
+        if self.chroma_store:
+            await self.chroma_store.delete_project_data(project_id)
+
+        logger.info(
+            "project_fully_deleted",
+            project_id=project_id,
+            sessions_deleted=sessions_deleted,
+        )
+        return {"sessions_deleted": sessions_deleted, "project_deleted": project_deleted}
+
     async def learn_from_text(self, project_id: str, text: str) -> None:
         """Directly store text as learning data in ChromaDB"""
         if self.chroma_store:
