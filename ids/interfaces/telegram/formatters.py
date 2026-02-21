@@ -47,29 +47,30 @@ class TelegramFormatter:
         last_round = session.rounds[-1]
         merged = last_round.merged_cross
 
+        if merged.std_confidence < 10:
+            agreement = "🎯 High Agreement"
+        elif merged.std_confidence < 20:
+            agreement = "👍 Good Agreement"
+        else:
+            agreement = "⚠️ Divergent Views"
+
+        content = last_round.generalist_response.response.replace("```", "'''")
+
         msg_parts = [
-            "⚠️ *DEAD-END REACHED*\n",
+            f"⚠️ *Round {last_round.round_number} — Dead End*\n",
             "━━━━━━━━━━━━━━━━━━━━\n\n",
-            "The Parliament couldn't reach consensus.\n\n",
-            "*Current State:*\n",
+            "*Scores:*\n",
             f"• Confidence: {merged.avg_confidence:.1f}%\n",
             f"• Risk: {merged.max_risk:.1f}%\n",
             f"• Outcome: {merged.avg_outcome:.1f}%\n\n",
-        ]
-
-        # Show each specialist's perspective using role_name
-        if last_round.agent_responses:
-            msg_parts.append("*Specialist Perspectives:*\n\n")
-            for resp in last_round.agent_responses:
-                preview = TelegramFormatter.escape_markdown(resp.response[:150])
-                msg_parts.append(f"*{resp.role_name}:*\n{preview}...\n\n")
-
-        msg_parts.append(
-            "I need your guidance to proceed. Please provide:\n"
+            f"*Status:* {agreement}\n\n",
+            f"*{last_round.generalist_response.role_name} Synthesis:*\n",
+            f"```\n{content}\n```\n\n",
+            "Please provide guidance to continue:\n"
             "• Additional context\n"
             "• Preference between approaches\n"
-            "• New direction to explore"
-        )
+            "• New direction to explore",
+        ]
 
         return "".join(msg_parts)
 

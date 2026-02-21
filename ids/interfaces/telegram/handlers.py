@@ -914,7 +914,11 @@ class TelegramHandlers:
 
     async def _handle_continuation(self, query, session):
         """Handle session continuation after pause"""
-        await query.edit_message_text("⏳ Continuing deliberation...")
+        # Remove buttons from the round summary so it stays readable in chat
+        try:
+            await query.edit_message_reply_markup(reply_markup=None)
+        except Exception:
+            pass
 
         async def send_update(msg: str):
             await query.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
