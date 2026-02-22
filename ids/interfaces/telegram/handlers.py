@@ -63,32 +63,12 @@ class TelegramHandlers:
 
         welcome_msg = (
             "👋 *Welcome to IDS!*\n"
-            "\n"
-            "🏛️ *Multi-agent deliberation platform*\n"
-            "\n"
-            "*Project Commands:*\n"
-            "/register\\_project \\- Register a new project\n"
-            "/list\\_projects \\- List your projects\n"
-            "/project \\- Switch to a project\n"
-            "/project\\_info \\- Show parliament configuration\n"
-            "/set\\_prompts \\- Configure parliament agents\n"
-            "\n"
-            "*Code Commands:*\n"
-            "/code \\- Generate/modify code\n"
-            "/analyze \\- Analyze a file\n"
-            "/validate \\- Validate recent changes\n"
-            "\n"
-            "*Knowledge Commands:*\n"
-            "/learn \\- Add to knowledge base\n"
-            "/sourcer \\- Query knowledge base\n"
-            "\n"
-            "*Session Commands:*\n"
-            "/status \\- Current session info\n"
-            "/history \\- Past sessions\n"
-            "/export \\- Export conversation\n"
-            "/cancel \\- Cancel current session\n"
-            "\n"
-            "📝 Just send me any question to start deliberation\\!"
+            "🏛️ Multi\\-agent deliberation platform\n\n"
+            "1\\. Register a project: `/register_project <name>`\n"
+            "2\\. Configure specialists: `/set_prompts specialist1 <url>`\n"
+            "3\\. Switch to it: `/project <name>`\n"
+            "4\\. Send any text to start a parliament deliberation\n\n"
+            "Use /help to see all available commands\\."
         )
 
         await update.message.reply_text(
@@ -104,21 +84,29 @@ class TelegramHandlers:
             "*IDS Commands*\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
             "*Project Management:*\n"
-            "/register\\_project <name> <desc> - Register new project\n"
-            "/list\\_projects - Show all your projects\n"
-            "/project <name> - Switch to project\n"
-            "/project\\_info - Show parliament configuration\n"
-            "/set\\_prompts <role> <url> - Configure agent prompts\n\n"
-            "*Session Control:*\n"
-            "/status - Current session info\n"
-            "/cancel - Cancel current session\n"
-            "/history - View past sessions\n\n"
-            "*Knowledge:*\n"
-            "/learn [text] - Add text to knowledge base\n"
-            "/sourcer <model> <query> - Query knowledge base\n\n"
-            "*Usage:*\n"
-            "Simply send a question ending with '?' to start deliberation.\n"
-            "Any other text is added to the project knowledge base."
+            "/register\\_project <name> \\[desc\\] — Register a new project\n"
+            "/list\\_projects — List all your projects\n"
+            "/project \\[name\\] — Show or switch active project\n"
+            "/project\\_info — Show parliament config and session stats\n"
+            "/set\\_prompts <role> <url> — Configure specialist/generalist/sourcer prompts\n"
+            "/delete\\_project <name> — Remove project and all its data\n\n"
+            "*Deliberation:*\n"
+            "💬 Send any text — Start a parliament deliberation\n"
+            "/status — Show active session info\n"
+            "/history — View past sessions for current project\n"
+            "/export \\[n\\] — Export session as JSON file\n"
+            "/cancel — Cancel the active session\n\n"
+            "*Knowledge Base:*\n"
+            "/learn \\[text\\] — Add text to knowledge base\n"
+            "/sourcer <model> <query> — Query knowledge base (model: claude/gemini)\n"
+            "📎 Send any file — Embed file into knowledge base (txt, md, py, pdf, ...)\n\n"
+            "*Code (Claude Code integration):*\n"
+            "/code <task> — Implement a task directly with Claude Code\n"
+            "/analyze <filepath> — Analyze a file\n"
+            "/validate — Validate recent changes\n\n"
+            "*Other:*\n"
+            "/start — Welcome message\n"
+            "/help — Show this help"
         )
 
         await update.message.reply_text(
@@ -232,13 +220,16 @@ class TelegramHandlers:
 
         await self.project_store.create_project(project)
 
+        # Auto-select the newly created project so the user can use it immediately
+        self.user_projects[user_id] = project
+
         await update.message.reply_text(
-            f"✅ Project *{project_name}* registered\\!\n\n"
+            f"✅ Project *{project_name}* registered and selected\\!\n\n"
             f"Configure parliament with:\n"
             f"`/set_prompts specialist1 <url>`\n"
             f"`/set_prompts specialist2 <url>`\n"
             f"`/set_prompts generalist <url>` (optional)\n\n"
-            f"Use `/project {project_name}` to switch to it\\.",
+            f"Ready\\! Use `/learn`, send files, or configure specialists\\.",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -596,6 +587,71 @@ class TelegramHandlers:
         # No active session — all text messages start deliberation
         if not text.startswith("/"):
             await self._start_deliberation(update, context, text, project)
+
+    async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle document uploads — extract text and embed into ChromaDB knowledge base."""
+        user_id = update.effective_user.id
+
+        if user_id not in settings.get_allowed_users():
+            return
+
+        project = self._get_project(user_id)
+        if not project:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        doc = update.message.document
+        filename = doc.file_name or "unnamed_file"
+        esc = self.formatter.escape_markdown
+
+        await update.message.reply_text(
+            f"📄 Processing *{esc(filename)}*...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        try:
+            # Download file bytes
+            tg_file = await context.bot.get_file(doc.file_id)
+            file_bytes = await tg_file.download_as_bytearray()
+
+            # Extract text
+            from ids.services.file_processor import extract_text, chunk_text
+            text = extract_text(filename, bytes(file_bytes))
+
+            if not text.strip():
+                await update.message.reply_text("⚠️ No text could be extracted from the file.")
+                return
+
+            # Chunk and embed
+            chunks = chunk_text(text)
+            stored = await self.session_manager.embed_file_chunks(
+                project_id=project.project_id,
+                filename=filename,
+                chunks=chunks,
+            )
+
+            await update.message.reply_text(
+                f"✅ *File embedded into knowledge base*\n\n"
+                f"• File: `{esc(filename)}`\n"
+                f"• Chunks stored: {stored}\n"
+                f"• Project: *{esc(project.name)}*\n\n"
+                f"Use `/sourcer` to query the knowledge base.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            logger.info(
+                "document_embedded",
+                user_id=user_id,
+                filename=filename,
+                project_id=project.project_id,
+                chunks=stored,
+            )
+
+        except ValueError as e:
+            await update.message.reply_text(f"❌ {str(e)}")
+        except Exception as e:
+            logger.error("document_embed_error", error=str(e), filename=filename)
+            await update.message.reply_text(f"❌ Error processing file: {str(e)}")
 
     async def _start_deliberation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, project: Project):
         """Internal helper to start deliberation"""
@@ -1037,3 +1093,13 @@ class TelegramHandlers:
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=self.keyboards.session_continue_keyboard()
             )
+
+    async def handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Catch unrecognised commands so typos don't silently disappear."""
+        text = update.message.text or ""
+        command = text.split()[0] if text else "unknown"
+        await update.message.reply_text(
+            f"❓ Unknown command: `{command}`\n"
+            f"Use /help to see all available commands.",
+            parse_mode=ParseMode.MARKDOWN
+        )

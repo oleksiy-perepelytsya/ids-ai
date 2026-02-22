@@ -5,7 +5,10 @@ version: '3.8'
 
 services:
   ids:
-    build: .
+    build:
+      context: .
+      args:
+        CLAUDE_CODE: "true"
     container_name: ids-app-dev
     env_file:
       - .env
@@ -20,6 +23,11 @@ services:
       - redis
     restart: unless-stopped
     command: sh -c "sleep 10 && python -m ids"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
 
   mongodb:
     image: mongo:7
@@ -30,6 +38,7 @@ services:
       - mongodb_data_dev:/data/db
     environment:
       - MONGO_INITDB_DATABASE=ids
+    command: mongod --bind_ip_all --wiredTigerCacheSizeGB 0.5
     restart: unless-stopped
 
   chromadb:

@@ -114,9 +114,10 @@ class TelegramFormatter:
 
         for project in projects:
             specialist_count = len(project.specialist_prompt_urls)
-            msg_parts.append(f"• *{project.name}*")
+            esc = TelegramFormatter.escape_markdown
+            msg_parts.append(f"• *{esc(project.name)}*")
             if project.description:
-                msg_parts.append(f" — {project.description}")
+                msg_parts.append(f" — {esc(project.description)}")
             msg_parts.append(f"\n  Specialists: {specialist_count} configured\n\n")
 
         msg_parts.append("Use /project <name> to switch.")

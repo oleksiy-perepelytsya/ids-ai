@@ -2,13 +2,11 @@ version: '3.8'
 
 services:
   ids:
-    # Use pre-built image from GitHub Container Registry
     image: ghcr.io/oleksiy-perepelytsya/ids-ai:latest
     container_name: ids-app
     env_file:
       - .env
     volumes:
-      # Only mount projects directory (user data)
       - ${PROJECTS_ROOT:-./projects}:/projects
     depends_on:
       - mongodb
@@ -16,39 +14,59 @@ services:
       - redis
     restart: unless-stopped
     command: sh -c "sleep 10 && python -m ids"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   mongodb:
     image: mongo:7
     container_name: ids-mongodb
-    ports:
-      - "27017:27017"
+    # No port exposed — only accessible within Docker network
     volumes:
       - mongodb_data:/data/db
     environment:
       - MONGO_INITDB_DATABASE=ids
+    # Limit WiredTiger cache to 256 MB (default is ~50% of RAM which is too much on a small VPS)
+    command: mongod --bind_ip_all --wiredTigerCacheSizeGB 0.25
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   chromadb:
     image: chromadb/chroma:latest
     container_name: ids-chromadb
-    ports:
-      - "8000:8000"
+    # No port exposed — only accessible within Docker network
     volumes:
       - chroma_data:/chroma/chroma
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   redis:
     image: redis:7-alpine
     container_name: ids-redis
-    ports:
-      - "6379:6379"
+    # No port exposed — only accessible within Docker network
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    # appendonly saves state across restarts; no-appendfsync-on-rewrite reduces I/O spikes
+    command: redis-server --appendonly yes --no-appendfsync-on-rewrite yes --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "2"
 
 volumes:
   mongodb_data:
