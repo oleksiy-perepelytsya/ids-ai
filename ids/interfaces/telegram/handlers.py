@@ -220,13 +220,16 @@ class TelegramHandlers:
 
         await self.project_store.create_project(project)
 
+        # Auto-select the newly created project so the user can use it immediately
+        self.user_projects[user_id] = project
+
         await update.message.reply_text(
-            f"✅ Project *{project_name}* registered\\!\n\n"
+            f"✅ Project *{project_name}* registered and selected\\!\n\n"
             f"Configure parliament with:\n"
             f"`/set_prompts specialist1 <url>`\n"
             f"`/set_prompts specialist2 <url>`\n"
             f"`/set_prompts generalist <url>` (optional)\n\n"
-            f"Use `/project {project_name}` to switch to it\\.",
+            f"Ready\\! Use `/learn`, send files, or configure specialists\\.",
             parse_mode=ParseMode.MARKDOWN
         )
 
@@ -1090,3 +1093,13 @@ class TelegramHandlers:
                 parse_mode=ParseMode.MARKDOWN,
                 reply_markup=self.keyboards.session_continue_keyboard()
             )
+
+    async def handle_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Catch unrecognised commands so typos don't silently disappear."""
+        text = update.message.text or ""
+        command = text.split()[0] if text else "unknown"
+        await update.message.reply_text(
+            f"❓ Unknown command: `{command}`\n"
+            f"Use /help to see all available commands.",
+            parse_mode=ParseMode.MARKDOWN
+        )

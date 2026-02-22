@@ -90,6 +90,9 @@ def create_bot(
     # Register callback query handler (for inline buttons)
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
 
+    # Catch-all for unrecognised commands (e.g. typos like /learm) — must be last
+    app.add_handler(MessageHandler(filters.COMMAND, handlers.handle_unknown_command))
+
     # Register error handler — surfaces all handler exceptions to the user
     app.add_error_handler(_error_handler)
 
