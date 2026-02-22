@@ -79,8 +79,9 @@ class TelegramHandlers:
             "/validate \\- Validate recent changes\n"
             "\n"
             "*Knowledge Commands:*\n"
-            "/learn \\- Add to knowledge base\n"
+            "/learn \\- Add text to knowledge base\n"
             "/sourcer \\- Query knowledge base\n"
+            "📎 Send any file to embed it in the knowledge base\n"
             "\n"
             "*Session Commands:*\n"
             "/status \\- Current session info\n"
@@ -115,10 +116,11 @@ class TelegramHandlers:
             "/history - View past sessions\n\n"
             "*Knowledge:*\n"
             "/learn [text] - Add text to knowledge base\n"
-            "/sourcer <model> <query> - Query knowledge base\n\n"
+            "/sourcer <model> <query> - Query knowledge base\n"
+            "📎 Send any file - embed it in the knowledge base\n\n"
             "*Usage:*\n"
-            "Simply send a question ending with '?' to start deliberation.\n"
-            "Any other text is added to the project knowledge base."
+            "Send any text message to start a deliberation.\n"
+            "Send a file (txt, md, py, pdf, ...) to add it to the knowledge base."
         )
 
         await update.message.reply_text(
@@ -596,6 +598,71 @@ class TelegramHandlers:
         # No active session — all text messages start deliberation
         if not text.startswith("/"):
             await self._start_deliberation(update, context, text, project)
+
+    async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle document uploads — extract text and embed into ChromaDB knowledge base."""
+        user_id = update.effective_user.id
+
+        if user_id not in settings.get_allowed_users():
+            return
+
+        project = self._get_project(user_id)
+        if not project:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        doc = update.message.document
+        filename = doc.file_name or "unnamed_file"
+        esc = self.formatter.escape_markdown
+
+        await update.message.reply_text(
+            f"📄 Processing *{esc(filename)}*...",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        try:
+            # Download file bytes
+            tg_file = await context.bot.get_file(doc.file_id)
+            file_bytes = await tg_file.download_as_bytearray()
+
+            # Extract text
+            from ids.services.file_processor import extract_text, chunk_text
+            text = extract_text(filename, bytes(file_bytes))
+
+            if not text.strip():
+                await update.message.reply_text("⚠️ No text could be extracted from the file.")
+                return
+
+            # Chunk and embed
+            chunks = chunk_text(text)
+            stored = await self.session_manager.embed_file_chunks(
+                project_id=project.project_id,
+                filename=filename,
+                chunks=chunks,
+            )
+
+            await update.message.reply_text(
+                f"✅ *File embedded into knowledge base*\n\n"
+                f"• File: `{esc(filename)}`\n"
+                f"• Chunks stored: {stored}\n"
+                f"• Project: *{esc(project.name)}*\n\n"
+                f"Use `/sourcer` to query the knowledge base.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+            logger.info(
+                "document_embedded",
+                user_id=user_id,
+                filename=filename,
+                project_id=project.project_id,
+                chunks=stored,
+            )
+
+        except ValueError as e:
+            await update.message.reply_text(f"❌ {str(e)}")
+        except Exception as e:
+            logger.error("document_embed_error", error=str(e), filename=filename)
+            await update.message.reply_text(f"❌ Error processing file: {str(e)}")
 
     async def _start_deliberation(self, update: Update, context: ContextTypes.DEFAULT_TYPE, text: str, project: Project):
         """Internal helper to start deliberation"""

@@ -81,6 +81,12 @@ def create_bot(
         handlers.handle_message
     ))
 
+    # Register document handler (for file uploads to knowledge base)
+    app.add_handler(MessageHandler(
+        filters.Document.ALL,
+        handlers.handle_document
+    ))
+
     # Register callback query handler (for inline buttons)
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
 

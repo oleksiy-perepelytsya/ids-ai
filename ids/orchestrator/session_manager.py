@@ -256,6 +256,31 @@ class SessionManager:
             )
             logger.info("direct_learning_added", project_id=project_id)
 
+    async def embed_file_chunks(self, project_id: str, filename: str, chunks: list[str]) -> int:
+        """Store file text chunks as learning patterns in ChromaDB. Returns number of chunks stored."""
+        if not self.chroma_store:
+            return 0
+
+        stored = 0
+        total = len(chunks)
+        for i, chunk in enumerate(chunks):
+            metadata = {
+                "type": "file_upload",
+                "filename": filename,
+                "chunk_index": i,
+                "total_chunks": total,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+            await self.chroma_store.add_learning_pattern(
+                project_id=project_id,
+                content=chunk,
+                metadata=metadata,
+            )
+            stored += 1
+
+        logger.info("file_embedded", project_id=project_id, filename=filename, chunks=stored)
+        return stored
+
     async def run_sourcer(
         self,
         project_id: str,
