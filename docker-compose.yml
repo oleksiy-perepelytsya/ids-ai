@@ -21,7 +21,7 @@ services:
         max-file: "3"
 
   mongodb:
-    image: mongo:7-alpine
+    image: mongo:7
     container_name: ids-mongodb
     # No port exposed — only accessible within Docker network
     volumes:
