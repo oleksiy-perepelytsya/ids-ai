@@ -44,9 +44,10 @@ class RoundExecutor:
         # Step 1: RAG retrieval
         learning_patterns = []
         if self.chroma_store:
+            rag_query = f"{session.task}\n{session.context}".strip() if session.context else session.task
             learning_patterns = await self.chroma_store.search_learning_patterns(
                 project_id=session.project_id,
-                query=session.task
+                query=rag_query
             )
             logger.info("rag_context_retrieved", count=len(learning_patterns))
 
