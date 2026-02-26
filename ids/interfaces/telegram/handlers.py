@@ -1,5 +1,6 @@
 """Telegram bot handlers for commands and messages"""
 
+import asyncio
 import re
 import uuid
 from pathlib import Path
@@ -48,6 +49,75 @@ class TelegramHandlers:
     def _get_project(self, user_id: int) -> Optional[Project]:
         """Get the active project for a user."""
         return self.user_projects.get(user_id)
+
+    @staticmethod
+    def _extract_urls(message) -> list[str]:
+        """Return URLs from Telegram message entities (type 'url' or 'text_link')."""
+        if not message.entities:
+            return []
+        urls: list[str] = []
+        text = message.text or ""
+        for entity in message.entities:
+            if entity.type == "url":
+                urls.append(text[entity.offset: entity.offset + entity.length])
+            elif entity.type == "text_link" and entity.url:
+                urls.append(entity.url)
+        return urls
+
+    @staticmethod
+    def _is_url_only_message(message, urls: list[str]) -> bool:
+        """Return True if message consists solely of URLs and whitespace."""
+        if not urls:
+            return False
+        remainder = message.text or ""
+        for entity in (message.entities or []):
+            if entity.type == "url":
+                url_text = (message.text or "")[entity.offset: entity.offset + entity.length]
+                remainder = remainder.replace(url_text, "", 1)
+        return remainder.strip() == ""
+
+    async def _process_url_background(
+        self,
+        url: str,
+        project_id: str,
+        chat_id: int,
+        context: ContextTypes.DEFAULT_TYPE,
+    ) -> None:
+        """Background task: download URL → extract → chunk → embed → notify."""
+        from ids.services.file_processor import download_url, extract_text, chunk_text
+        esc = self.formatter.escape_markdown
+        try:
+            filename, file_bytes = await download_url(url)
+            text = extract_text(filename, file_bytes)
+            if not text.strip():
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=f"⚠️ `{esc(url)}` — no extractable text found",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                return
+            chunks = chunk_text(text)
+            stored = await self.session_manager.embed_file_chunks(project_id, filename, chunks)
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"✅ *{esc(filename)}* embedded — {stored} chunk(s)",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            logger.info("url_embedded", url=url, filename=filename, project_id=project_id, chunks=stored)
+        except ValueError as e:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ `{esc(url)}` — {esc(str(e))}",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            logger.warning("url_embed_rejected", url=url, error=str(e))
+        except Exception as e:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"❌ `{esc(url)}` — unexpected error: {esc(str(e))}",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            logger.error("url_embed_error", url=url, error=str(e))
 
     async def cmd_start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -566,6 +636,19 @@ class TelegramHandlers:
                 self.awaiting_learn[user_id] = False
                 await update.message.reply_text("❌ No active project. Please use /project first.")
                 return
+
+        # 2.5 URL-only messages → background file download + embedding
+        urls = self._extract_urls(update.message)
+        if self._is_url_only_message(update.message, urls):
+            if not project:
+                await update.message.reply_text("❌ No active project. Please use /project first.")
+                return
+            await update.message.reply_text(f"📥 Downloading {len(urls)} file(s) in background...")
+            for url in urls:
+                asyncio.create_task(
+                    self._process_url_background(url, project.project_id, update.effective_chat.id, context)
+                )
+            return
 
         # 3. Standard Deliberation or knowledge capture
         if not project:

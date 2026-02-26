@@ -2,6 +2,7 @@
 
 import io
 from typing import List
+from urllib.parse import urlparse, unquote
 
 SUPPORTED_TEXT_EXTENSIONS = {
     ".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx",
@@ -10,6 +11,41 @@ SUPPORTED_TEXT_EXTENSIONS = {
     ".csv", ".rst", ".env", ".java", ".go", ".rs",
     ".cpp", ".c", ".h", ".cs", ".rb", ".php",
 }
+
+
+async def download_url(url: str) -> tuple[str, bytes]:
+    """Download a file from a URL and return (filename, bytes).
+
+    Raises ValueError for non-2xx HTTP status or files exceeding 50 MB.
+    Raises aiohttp.ClientError on network failures.
+    """
+    import aiohttp  # local import — keeps module importable without network
+
+    MAX_BYTES = 50 * 1024 * 1024  # 50 MB
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            if not (200 <= resp.status < 300):
+                raise ValueError(f"HTTP {resp.status} from {url}")
+            filename = _filename_from_response(resp.headers, url)
+            body = await resp.content.read(MAX_BYTES + 1)
+            if len(body) > MAX_BYTES:
+                raise ValueError(f"File exceeds 50 MB limit: {url}")
+    return filename, body
+
+
+def _filename_from_response(headers, url: str) -> str:
+    """Extract filename from Content-Disposition header or URL path."""
+    import re
+    cd = headers.get("Content-Disposition", "")
+    if cd:
+        m = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
+        if m:
+            name = m.group(1).strip().strip('"\'')
+            if name:
+                return name
+    path_part = urlparse(url).path.rstrip("/").split("/")[-1]
+    return unquote(path_part) if path_part else "downloaded_file"
 
 
 def extract_text(filename: str, file_bytes: bytes) -> str:
