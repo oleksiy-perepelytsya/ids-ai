@@ -25,6 +25,9 @@ class Project(BaseModel):
         description="Map of specialist key ('1', '2', ...) to prompt URL"
     )
 
+    # Model overrides per agent role (None = use global default from settings)
+    generalist_model: Optional[str] = Field(default=None, description="LLM model for generalist agent")
+
     # Response size limits in tokens
     specialist_max_tokens: int = Field(default=1000, description="Max tokens for specialist responses")
     generalist_max_tokens: int = Field(default=2000, description="Max tokens for generalist responses")

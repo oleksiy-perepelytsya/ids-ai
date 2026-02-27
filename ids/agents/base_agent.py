@@ -15,14 +15,22 @@ class Agent:
     Differentiation comes from the system_prompt passed at construction.
     """
 
-    def __init__(self, role_id: str, system_prompt: str, llm_client: LLMClient, max_tokens: int = 1000):
+    def __init__(
+        self,
+        role_id: str,
+        system_prompt: str,
+        llm_client: LLMClient,
+        max_tokens: int = 1000,
+        default_model: Optional[str] = None
+    ):
         self.role_id = role_id
         self.system_prompt = system_prompt
         self.role_name = self._extract_role_name(system_prompt)
         self.llm_client = llm_client
         self.max_tokens = max_tokens
+        self.default_model = default_model  # overrides built-in Claude/Gemini routing when set
         self._is_generalist = (role_id == ROLE_GENERALIST)
-        logger.info("agent_initialized", role_id=role_id, role_name=self.role_name)
+        logger.info("agent_initialized", role_id=role_id, role_name=self.role_name, model=default_model)
 
     def _extract_role_name(self, prompt: str) -> str:
         """Extract role name from '# Role: <name>' header in the system prompt."""
@@ -61,9 +69,11 @@ class Agent:
             prompt = self._build_specialist_prompt(task, context, previous_rounds_summary, learning_patterns)
 
         # Call appropriate LLM
-        if model_override:
+        # Priority: per-call model_override > per-agent default_model > built-in routing
+        effective_model = model_override or self.default_model
+        if effective_model:
             response_text = await self.llm_client.call_model(
-                model=model_override,
+                model=effective_model,
                 prompt=prompt,
                 system_prompt=self.system_prompt,
                 temperature=0.7,

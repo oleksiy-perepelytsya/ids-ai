@@ -159,6 +159,7 @@ class TelegramHandlers:
             "/project \\[name\\] — Show or switch active project\n"
             "/project\\_info — Show parliament config and session stats\n"
             "/set\\_prompts <role> <url> — Configure specialist/generalist/sourcer prompts\n"
+            "/set\\_model generalist <claude|gemini> — Switch generalist LLM model\n"
             "/delete\\_project <name> — Remove project and all its data\n\n"
             "*Deliberation:*\n"
             "💬 Send any text — Start a parliament deliberation\n"
@@ -489,6 +490,81 @@ class TelegramHandlers:
         )
 
         logger.info("prompts_updated", user_id=user_id, project_id=project.project_id, role=role_label)
+
+    async def cmd_set_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /set_model command to switch the LLM model for an agent role.
+
+        Usage:
+            /set_model generalist claude
+            /set_model generalist gemini
+            /set_model — show current model
+        """
+        from ids.config import settings as app_settings
+
+        user_id = update.effective_user.id
+        project = self._get_project(user_id)
+
+        if not project:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        esc = self.formatter.escape_markdown
+
+        if not context.args or len(context.args) < 2:
+            current = project.generalist_model or f"claude (default: `{esc(app_settings.claude_model)}`)"
+            await update.message.reply_text(
+                "*Agent Model Configuration*\n\n"
+                f"Current generalist model: `{esc(str(current))}`\n\n"
+                "Usage: `/set_model <role> <model>`\n\n"
+                "Roles: `generalist`\n"
+                "Models: `claude`, `gemini`\n\n"
+                "Examples:\n"
+                "`/set_model generalist gemini`\n"
+                "`/set_model generalist claude`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        role_arg = context.args[0].lower()
+        model_arg = context.args[1].lower()
+
+        if role_arg != "generalist":
+            await update.message.reply_text("❌ Only `generalist` model is configurable. Specialists always use Gemini.")
+            return
+
+        MODEL_ALIASES = {
+            "claude": app_settings.claude_model,
+            "gemini": app_settings.gemini_model,
+        }
+
+        if model_arg not in MODEL_ALIASES:
+            await update.message.reply_text(
+                f"❌ Unknown model `{esc(model_arg)}`. Use `claude` or `gemini`."
+            )
+            return
+
+        model_id = MODEL_ALIASES[model_arg]
+
+        # Reload from DB, update, persist
+        project = await self.project_store.get_project(project.project_id)
+        project.generalist_model = model_id
+        from datetime import datetime
+        project.updated_at = datetime.utcnow()
+        await self.project_store.update_project(project)
+
+        # Update in-memory cache and invalidate agent cache
+        self.user_projects[user_id] = project
+        self.session_manager.invalidate_agent_cache(project.project_id)
+
+        await update.message.reply_text(
+            f"✅ *Generalist model updated*\n\n"
+            f"• Role: `generalist`\n"
+            f"• Model: `{esc(model_id)}`\n"
+            f"• Project: *{esc(project.name)}*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        logger.info("generalist_model_updated", user_id=user_id, project_id=project.project_id, model=model_id)
 
     async def cmd_delete_project(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /delete_project command — shows confirmation before wiping all data."""

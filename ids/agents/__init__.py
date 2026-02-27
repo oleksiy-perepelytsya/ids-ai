@@ -22,13 +22,14 @@ async def create_agents_for_project(project: Project, llm_client: LLMClient) -> 
     """
     agents: dict[str, Agent] = {}
 
-    # Generalist (Claude)
+    # Generalist (Claude by default, overridable per project)
     generalist_prompt = await fetch_or_fallback(project.generalist_prompt_url, "generalist.md")
     agents[ROLE_GENERALIST] = Agent(
         role_id=ROLE_GENERALIST,
         system_prompt=generalist_prompt,
         llm_client=llm_client,
-        max_tokens=project.generalist_max_tokens
+        max_tokens=project.generalist_max_tokens,
+        default_model=project.generalist_model
     )
 
     # Sourcer (Gemini)
