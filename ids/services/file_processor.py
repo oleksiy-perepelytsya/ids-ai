@@ -89,7 +89,7 @@ async def download_url(url: str) -> tuple[str, bytes]:
     fallback_filename = google[1] if google else ""
 
     async with aiohttp.ClientSession() as session:
-        async with session.get(fetch_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+        async with session.get(fetch_url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
             if not (200 <= resp.status < 300):
                 raise ValueError(f"HTTP {resp.status} from {url}")
 
@@ -99,9 +99,16 @@ async def download_url(url: str) -> tuple[str, bytes]:
                 raise ValueError(f"URL returned an HTML page instead of a file.{hint}")
 
             filename = _filename_from_response(resp.headers, fetch_url) or fallback_filename or "downloaded_file"
-            body = await resp.content.read(MAX_BYTES + 1)
-            if len(body) > MAX_BYTES:
-                raise ValueError(f"File exceeds 50 MB limit: {url}")
+
+            # Chunk-based reading — more reliable than read(n) for streaming responses
+            chunks = []
+            total = 0
+            async for chunk in resp.content.iter_chunked(65536):
+                total += len(chunk)
+                if total > MAX_BYTES:
+                    raise ValueError(f"File exceeds 50 MB limit: {url}")
+                chunks.append(chunk)
+            body = b"".join(chunks)
 
     return filename, body
 
