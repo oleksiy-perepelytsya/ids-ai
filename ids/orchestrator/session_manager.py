@@ -287,19 +287,41 @@ class SessionManager:
         task: str,
         model: str
     ) -> str:
-        """Run single-agent 'Sourcer' mode with RAG"""
+        """Run single-agent 'Sourcer' mode with RAG from ChromaDB + MongoDB session history"""
         agents = await self._get_agents(project_id)
         sourcer = agents.get(ROLE_SOURCER)
         if not sourcer:
             raise ValueError("Sourcer agent not initialized for this project")
 
-        # RAG retrieval
+        # ChromaDB: semantic pattern retrieval
         learning_patterns = []
         if self.chroma_store:
             learning_patterns = await self.chroma_store.search_learning_patterns(
                 project_id=project_id,
                 query=task
             )
+
+        # MongoDB: recent consensus session history
+        past_sessions = await self.session_store.get_completed_sessions(project_id)
+        for session in past_sessions:
+            if not session.rounds:
+                continue
+            last_round = session.rounds[-1]
+            summary = (
+                f"Past deliberation: {session.task}\n"
+                f"Conclusion: {last_round.generalist_response.response}"
+            )
+            learning_patterns.append({
+                "content": summary,
+                "metadata": {"type": "past_session", "session_id": session.session_id}
+            })
+
+        logger.info(
+            "sourcer_context_built",
+            project_id=project_id,
+            chroma_patterns=len(learning_patterns) - len(past_sessions),
+            mongo_sessions=len(past_sessions)
+        )
 
         # Analyze
         response = await sourcer.analyze(

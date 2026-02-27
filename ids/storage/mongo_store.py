@@ -72,6 +72,26 @@ class MongoSessionStore(BaseSessionStore):
 
         return sessions
 
+    async def get_completed_sessions(
+        self,
+        project_id: str,
+        limit: int = 10
+    ) -> List[DevSession]:
+        """Get recent consensus sessions for a project (for Sourcer context)."""
+        cursor = self.sessions.find(
+            {
+                "project_id": project_id,
+                "status": SessionStatus.CONSENSUS
+            }
+        ).sort("updated_at", -1).limit(limit)
+
+        sessions = []
+        async for doc in cursor:
+            doc.pop("_id", None)
+            sessions.append(DevSession(**doc))
+
+        return sessions
+
     async def delete_project_sessions(self, project_id: str) -> int:
         """Delete all sessions for a project"""
         result = await self.sessions.delete_many({"project_id": project_id})
