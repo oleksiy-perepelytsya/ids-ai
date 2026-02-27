@@ -186,6 +186,8 @@ class ConsensusBuilder:
         """
         if round_num < max_rounds:
             return False  # Always run at least max_rounds rounds before giving up
+        if round_num >= max_rounds:
+            return True  # Exhausted all configured rounds without consensus
 
         dead_end_config = self.thresholds.get("dead_end", {})
 
