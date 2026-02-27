@@ -160,6 +160,7 @@ class TelegramHandlers:
             "/project\\_info — Show parliament config and session stats\n"
             "/set\\_prompts <role> <url> — Configure specialist/generalist/sourcer prompts\n"
             "/set\\_model generalist <claude|gemini> — Switch generalist LLM model\n"
+            "/set\\_rounds <n> — Set max deliberation rounds before dead\\-end\n"
             "/delete\\_project <name> — Remove project and all its data\n\n"
             "*Deliberation:*\n"
             "💬 Send any text — Start a parliament deliberation\n"
@@ -565,6 +566,61 @@ class TelegramHandlers:
             parse_mode=ParseMode.MARKDOWN
         )
         logger.info("generalist_model_updated", user_id=user_id, project_id=project.project_id, model=model_id)
+
+    async def cmd_set_rounds(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /set_rounds command to configure max deliberation rounds per project.
+
+        Usage:
+            /set_rounds <n>    — set max rounds (1–10)
+            /set_rounds        — show current setting
+        """
+        from ids.config import settings as app_settings
+
+        user_id = update.effective_user.id
+        project = self._get_project(user_id)
+
+        if not project:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        esc = self.formatter.escape_markdown
+
+        if not context.args:
+            current = project.max_rounds or app_settings.max_rounds
+            source = "project" if project.max_rounds else "global default"
+            await update.message.reply_text(
+                f"*Deliberation Rounds*\n\n"
+                f"Current: `{current}` ({source})\n\n"
+                f"Usage: `/set_rounds <n>` \\(1–10\\)",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            return
+
+        try:
+            n = int(context.args[0])
+        except ValueError:
+            await update.message.reply_text("❌ Please provide a number, e.g. `/set_rounds 5`")
+            return
+
+        if not (1 <= n <= 10):
+            await update.message.reply_text("❌ Rounds must be between 1 and 10.")
+            return
+
+        project = await self.project_store.get_project(project.project_id)
+        project.max_rounds = n
+        from datetime import datetime
+        project.updated_at = datetime.utcnow()
+        await self.project_store.update_project(project)
+        self.user_projects[user_id] = project
+
+        await update.message.reply_text(
+            f"✅ *Max rounds updated*\n\n"
+            f"• Rounds: `{n}`\n"
+            f"• Project: *{esc(project.name)}*",
+            parse_mode=ParseMode.MARKDOWN
+        )
+        logger.info("max_rounds_updated", user_id=user_id, project_id=project.project_id, max_rounds=n)
 
     async def cmd_delete_project(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /delete_project command — shows confirmation before wiping all data."""

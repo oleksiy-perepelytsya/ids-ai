@@ -28,6 +28,9 @@ class Project(BaseModel):
     # Model overrides per agent role (None = use global default from settings)
     generalist_model: Optional[str] = Field(default=None, description="LLM model for generalist agent")
 
+    # Deliberation limits (None = use global default from settings)
+    max_rounds: Optional[int] = Field(default=None, description="Max deliberation rounds before dead-end")
+
     # Response size limits in tokens
     specialist_max_tokens: int = Field(default=1000, description="Max tokens for specialist responses")
     generalist_max_tokens: int = Field(default=2000, description="Max tokens for generalist responses")

@@ -65,6 +65,7 @@ def create_bot(
     app.add_handler(CommandHandler("project_info", handlers.cmd_project_info))
     app.add_handler(CommandHandler("set_prompts", handlers.cmd_set_prompts))
     app.add_handler(CommandHandler("set_model", handlers.cmd_set_model))
+    app.add_handler(CommandHandler("set_rounds", handlers.cmd_set_rounds))
     app.add_handler(CommandHandler("delete_project", handlers.cmd_delete_project))
     app.add_handler(CommandHandler("status", handlers.cmd_status))
     app.add_handler(CommandHandler("history", handlers.cmd_history))

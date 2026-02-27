@@ -135,13 +135,15 @@ class SessionManager:
 
         round_num = session.get_current_round_number()
 
-        # Check if we've already reached max rounds
-        if round_num > settings.max_rounds:
+        # Check if we've already reached max rounds (project override or global default)
+        project = await self.project_store.get_project(session.project_id)
+        max_rounds = (project.max_rounds if project and project.max_rounds else None) or settings.max_rounds
+        if round_num > max_rounds:
             session.status = SessionStatus.DEAD_END
             await self.session_store.update_session(session)
             if progress_callback:
                 await progress_callback(
-                    f"⚠️ Reached maximum rounds ({settings.max_rounds}). Need your guidance..."
+                    f"⚠️ Reached maximum rounds ({max_rounds}). Need your guidance..."
                 )
             return session
 
