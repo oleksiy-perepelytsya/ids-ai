@@ -44,7 +44,12 @@ class RoundExecutor:
         # Step 1: RAG retrieval
         learning_patterns = []
         if self.chroma_store:
-            rag_query = f"{session.task}\n{session.context}".strip() if session.context else session.task
+            rag_parts = [session.task]
+            if session.context:
+                rag_parts.append(session.context)
+            if session.rounds:
+                rag_parts.append(session.rounds[-1].generalist_response.response)
+            rag_query = "\n".join(rag_parts)
             learning_patterns = await self.chroma_store.search_learning_patterns(
                 project_id=session.project_id,
                 query=rag_query
