@@ -155,7 +155,7 @@ class SessionManager:
         executor = await self._get_executor(session.project_id)
 
         # Execute round
-        round_result = await executor.execute_round(session, round_num)
+        round_result = await executor.execute_round(session, round_num, max_rounds=max_rounds)
 
         # Add to session
         session.add_round(round_result)

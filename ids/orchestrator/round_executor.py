@@ -27,7 +27,8 @@ class RoundExecutor:
     async def execute_round(
         self,
         session: DevSession,
-        round_num: int
+        round_num: int,
+        max_rounds: int = 3
     ) -> RoundResult:
         """
         Execute a deliberation round.
@@ -104,7 +105,8 @@ class RoundExecutor:
         decision, reasoning = self.consensus_builder.evaluate_round(
             round_result,
             round_num,
-            session
+            session,
+            max_rounds=max_rounds
         )
         round_result.decision = decision
         round_result.decision_reasoning = reasoning

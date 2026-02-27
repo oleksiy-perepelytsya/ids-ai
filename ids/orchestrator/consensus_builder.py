@@ -39,7 +39,8 @@ class ConsensusBuilder:
         self,
         round_result: RoundResult,
         round_num: int,
-        session: DevSession
+        session: DevSession,
+        max_rounds: int = 3
     ) -> tuple[DecisionResult, str]:
         """
         Evaluate a deliberation round and determine outcome.
@@ -75,8 +76,8 @@ class ConsensusBuilder:
             logger.info("consensus_reached", round_num=round_num)
             return DecisionResult.CONSENSUS, reasoning
 
-        # Check if dead-end
-        if self._detect_dead_end(session, round_num):
+        # Check if dead-end (only after max_rounds reached to respect user's configured limit)
+        if self._detect_dead_end(session, round_num, max_rounds):
             reasoning = (
                 f"Dead-end detected after {round_num} round(s). "
                 f"Unable to reach consensus. Confidence: {merged.avg_confidence:.1f}, "
@@ -171,7 +172,7 @@ class ConsensusBuilder:
 
         return default
 
-    def _detect_dead_end(self, session: DevSession, round_num: int) -> bool:
+    def _detect_dead_end(self, session: DevSession, round_num: int, max_rounds: int = 3) -> bool:
         """
         Detect if deliberation has reached a dead-end.
 
@@ -179,9 +180,12 @@ class ConsensusBuilder:
         1. Confidence declining across rounds
         2. Persistent high risks
         3. No progress toward consensus
+
+        Pattern-based dead-end is only declared once max_rounds is reached,
+        so that user-configured round limits are respected.
         """
-        if round_num < 2:
-            return False  # Need at least 2 rounds to detect patterns
+        if round_num < max_rounds:
+            return False  # Always run at least max_rounds rounds before giving up
 
         dead_end_config = self.thresholds.get("dead_end", {})
 
