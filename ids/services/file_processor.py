@@ -1,8 +1,9 @@
 """File text extraction and chunking for ChromaDB embedding"""
 
 import io
+import re
 from typing import List
-from urllib.parse import urlparse, unquote
+from urllib.parse import urlparse, unquote, parse_qs
 
 SUPPORTED_TEXT_EXTENSIONS = {
     ".txt", ".md", ".py", ".js", ".ts", ".jsx", ".tsx",
@@ -13,30 +14,100 @@ SUPPORTED_TEXT_EXTENSIONS = {
 }
 
 
+def _detect_google_url(url: str) -> tuple[str, str] | None:
+    """
+    Detect Google Drive / Docs / Sheets / Slides share links and transform them
+    into direct download URLs.
+
+    Returns (download_url, fallback_filename) or None if not a Google URL.
+    """
+    # Google Drive file share: drive.google.com/file/d/FILE_ID/...
+    m = re.match(r'https?://drive\.google\.com/file/d/([^/?]+)', url)
+    if m:
+        file_id = m.group(1)
+        return (
+            f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
+            "",  # Google sets Content-Disposition with real filename
+        )
+
+    # Google Drive open: drive.google.com/open?id=FILE_ID
+    if re.search(r'drive\.google\.com/open', url):
+        qs = parse_qs(urlparse(url).query)
+        if "id" in qs:
+            file_id = qs["id"][0]
+            return (
+                f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
+                "",
+            )
+
+    # Google Docs: docs.google.com/document/d/DOC_ID/...
+    m = re.match(r'https?://docs\.google\.com/document/d/([^/?]+)', url)
+    if m:
+        doc_id = m.group(1)
+        return (
+            f"https://docs.google.com/document/d/{doc_id}/export?format=txt",
+            f"document_{doc_id[:8]}.txt",
+        )
+
+    # Google Sheets: docs.google.com/spreadsheets/d/SHEET_ID/...
+    m = re.match(r'https?://docs\.google\.com/spreadsheets/d/([^/?]+)', url)
+    if m:
+        sheet_id = m.group(1)
+        return (
+            f"https://docs.google.com/spreadsheets/d/{sheet_id}/export?format=csv",
+            f"spreadsheet_{sheet_id[:8]}.csv",
+        )
+
+    # Google Slides: docs.google.com/presentation/d/PRES_ID/...
+    m = re.match(r'https?://docs\.google\.com/presentation/d/([^/?]+)', url)
+    if m:
+        pres_id = m.group(1)
+        return (
+            f"https://docs.google.com/presentation/d/{pres_id}/export/txt",
+            f"presentation_{pres_id[:8]}.txt",
+        )
+
+    return None
+
+
 async def download_url(url: str) -> tuple[str, bytes]:
     """Download a file from a URL and return (filename, bytes).
 
-    Raises ValueError for non-2xx HTTP status or files exceeding 50 MB.
+    Automatically transforms Google Drive / Docs / Sheets / Slides share links
+    into direct download URLs.
+
+    Raises ValueError for non-2xx HTTP status, HTML responses (auth/redirect
+    pages), or files exceeding 50 MB.
     Raises aiohttp.ClientError on network failures.
     """
     import aiohttp  # local import — keeps module importable without network
 
     MAX_BYTES = 50 * 1024 * 1024  # 50 MB
 
+    google = _detect_google_url(url)
+    fetch_url = google[0] if google else url
+    fallback_filename = google[1] if google else ""
+
     async with aiohttp.ClientSession() as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+        async with session.get(fetch_url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
             if not (200 <= resp.status < 300):
                 raise ValueError(f"HTTP {resp.status} from {url}")
-            filename = _filename_from_response(resp.headers, url)
+
+            content_type = resp.headers.get("Content-Type", "")
+            if "text/html" in content_type:
+                hint = " Ensure the file is shared as 'Anyone with the link'." if google else ""
+                raise ValueError(f"URL returned an HTML page instead of a file.{hint}")
+
+            filename = _filename_from_response(resp.headers, fetch_url) or fallback_filename or "downloaded_file"
             body = await resp.content.read(MAX_BYTES + 1)
             if len(body) > MAX_BYTES:
                 raise ValueError(f"File exceeds 50 MB limit: {url}")
+
     return filename, body
 
 
 def _filename_from_response(headers, url: str) -> str:
     """Extract filename from Content-Disposition header or URL path."""
-    import re
     cd = headers.get("Content-Disposition", "")
     if cd:
         m = re.search(r'filename\*?=["\']?(?:UTF-8\'\')?([^"\';\r\n]+)', cd, re.IGNORECASE)
@@ -45,7 +116,7 @@ def _filename_from_response(headers, url: str) -> str:
             if name:
                 return name
     path_part = urlparse(url).path.rstrip("/").split("/")[-1]
-    return unquote(path_part) if path_part else "downloaded_file"
+    return unquote(path_part) if path_part else ""
 
 
 def extract_text(filename: str, file_bytes: bytes) -> str:
