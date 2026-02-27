@@ -148,10 +148,11 @@ class TelegramFormatter:
                 msg_parts.append(f"• specialist\\_{key}: `{url}`\n")
 
         msg_parts.append("\n*Roles:*\n")
+        generalist_model = esc(project.generalist_model) if project.generalist_model else "claude (default)"
         if project.generalist_prompt_url:
-            msg_parts.append(f"• Generalist: `{project.generalist_prompt_url}` [max {project.generalist_max_tokens} tokens]\n")
+            msg_parts.append(f"• Generalist: `{project.generalist_prompt_url}` [model: {generalist_model}, max {project.generalist_max_tokens} tokens]\n")
         else:
-            msg_parts.append(f"• Generalist: using default [max {project.generalist_max_tokens} tokens]\n")
+            msg_parts.append(f"• Generalist: using default [model: {generalist_model}, max {project.generalist_max_tokens} tokens]\n")
 
         if project.sourcer_prompt_url:
             msg_parts.append(f"• Sourcer: `{project.sourcer_prompt_url}` [max {project.sourcer_max_tokens} tokens]\n")
@@ -159,6 +160,12 @@ class TelegramFormatter:
             msg_parts.append(f"• Sourcer: using default [max {project.sourcer_max_tokens} tokens]\n")
 
         msg_parts.append(f"• Specialists: max {project.specialist_max_tokens} tokens each\n")
+
+        msg_parts.append("\n*Deliberation Settings:*\n")
+        from ids.config import settings as app_settings
+        max_rounds = project.max_rounds if project.max_rounds else app_settings.max_rounds
+        rounds_source = "project" if project.max_rounds else "global default"
+        msg_parts.append(f"• Max rounds: `{max_rounds}` ({rounds_source})\n")
 
         if session_count > 0:
             msg_parts.append(f"\n*Sessions:* {session_count} total")
@@ -171,6 +178,8 @@ class TelegramFormatter:
             "`/set_prompts specialist1 <url>`\n"
             "`/set_prompts specialist2 <url>`\n"
             "`/set_prompts generalist <url>` (optional)\n"
+            "`/set_model generalist <claude|gemini>`\n"
+            "`/set_rounds <n>`\n"
         )
 
         return "".join(msg_parts)
