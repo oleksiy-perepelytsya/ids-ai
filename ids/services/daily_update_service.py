@@ -1,12 +1,26 @@
 """Daily Update Service — calls LLM agent with daily_update persona, parses JSON, stores fingerprint."""
 
 import json
+import os
 import re
+import sys
 from datetime import date, datetime
-from ids.services.prompt_loader import fetch_or_fallback
+
 from ids.utils import get_logger
 
 logger = get_logger(__name__)
+
+# Import prompt generator from project root (planetary_fingerprint_agent_prompt.py)
+_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
+if _root not in sys.path:
+    sys.path.insert(0, _root)
+
+try:
+    from planetary_fingerprint_agent_prompt import generate_agent_prompt
+    _has_agent_prompt = True
+except ImportError:
+    _has_agent_prompt = False
+    logger.warning("planetary_fingerprint_agent_prompt_not_found")
 
 
 class DailyUpdateService:
@@ -19,9 +33,9 @@ class DailyUpdateService:
     async def run(self, target_date: date, model: str = "gemini") -> dict:
         """
         Run daily update for the given date:
-        1. Load daily_update persona prompt
+        1. Build system + user prompts (from planetary_fingerprint_agent_prompt.py or fallback)
         2. Call LLM with date as input
-        3. Parse JSON response
+        3. Parse JSON response (agent returns chromadb_ready section + raw data)
         4. Store in MongoDB + ChromaDB
         5. Return stored document
 
@@ -31,30 +45,35 @@ class DailyUpdateService:
         """
         logger.info("daily_update_started", date=target_date.isoformat(), model=model)
 
-        # Load agent persona
-        system_prompt = await fetch_or_fallback(None, "daily_update.md")
+        # Build prompts
+        if _has_agent_prompt:
+            prompts = generate_agent_prompt(target_date.isoformat())
+            system_prompt = prompts["system"]
+            user_prompt = prompts["user"]
+        else:
+            # Legacy fallback
+            from ids.services.prompt_loader import fetch_or_fallback
+            system_prompt = await fetch_or_fallback(None, "daily_update.md")
+            user_prompt = (
+                f"Generate the planetary daily fingerprint for: {target_date.isoformat()}\n"
+                f"Julian day reference: days since J2000.0 = {(target_date - date(2000, 1, 1)).days}\n"
+                f"Return only the JSON object."
+            )
 
-        # Build user prompt
-        user_prompt = (
-            f"Generate the planetary daily fingerprint for: {target_date.isoformat()}\n"
-            f"Julian day reference: days since J2000.0 = {(target_date - date(2000, 1, 1)).days}\n"
-            f"Return only the JSON object."
-        )
-
-        # Call LLM
+        # Call LLM — 8000 tokens to fit the full 22-dim schema
         if model == "claude":
             raw = await self.llm_client.call_claude(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=0.2,
-                max_tokens=4000,
+                max_tokens=8000,
             )
         else:
             raw = await self.llm_client.call_gemini(
                 prompt=user_prompt,
                 system_prompt=system_prompt,
                 temperature=0.2,
-                max_tokens=4000,
+                max_tokens=8000,
             )
 
         logger.info("daily_update_llm_response_received", date=target_date.isoformat())
@@ -62,14 +81,14 @@ class DailyUpdateService:
         # Parse JSON from response
         doc = self._parse_json(raw)
 
-        # Ensure required fields
+        # Ensure required identity fields
         doc["date"] = target_date.isoformat()
-        doc.setdefault("source", "agent")
+        doc.setdefault("source", "agent_collected")
         doc["updated_at"] = datetime.utcnow().isoformat() + "Z"
         doc["version"] = "1.0"
         doc.setdefault("day_of_year", target_date.timetuple().tm_yday)
 
-        # Store and vectorize
+        # Store and vectorize (fingerprint_store handles chromadb_ready extraction)
         stored = await self.fingerprint_store.upsert(doc)
 
         logger.info("daily_update_complete", date=target_date.isoformat())
