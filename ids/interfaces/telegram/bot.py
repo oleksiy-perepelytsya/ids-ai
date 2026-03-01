@@ -38,6 +38,7 @@ def create_bot(
     session_manager: SessionManager,
     project_store: MongoProjectStore,
     code_workflow: Optional[CodeWorkflow] = None,
+    daily_update_service=None,
 ) -> Application:
     """
     Create and configure Telegram bot application.
@@ -54,7 +55,7 @@ def create_bot(
     app = Application.builder().token(settings.telegram_bot_token).build()
 
     # Create handlers instance
-    handlers = TelegramHandlers(session_manager, project_store, code_workflow)
+    handlers = TelegramHandlers(session_manager, project_store, code_workflow, daily_update_service)
 
     # Register command handlers
     app.add_handler(CommandHandler("start", handlers.cmd_start))
@@ -76,6 +77,7 @@ def create_bot(
     app.add_handler(CommandHandler("code", handlers.cmd_code))
     app.add_handler(CommandHandler("analyze", handlers.cmd_analyze))
     app.add_handler(CommandHandler("validate", handlers.cmd_validate))
+    app.add_handler(CommandHandler("daily_update", handlers.cmd_daily_update))
 
     # Register message handler (for task submission)
     app.add_handler(MessageHandler(

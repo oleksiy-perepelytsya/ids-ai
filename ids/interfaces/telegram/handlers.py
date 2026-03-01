@@ -30,10 +30,12 @@ class TelegramHandlers:
         session_manager: SessionManager,
         project_store: MongoProjectStore,
         code_workflow: Optional[CodeWorkflow] = None,
+        daily_update_service=None,
     ):
         self.session_manager = session_manager
         self.project_store = project_store
         self.code_workflow = code_workflow
+        self.daily_update_service = daily_update_service
         self.formatter = TelegramFormatter()
         self.keyboards = TelegramKeyboards()
 
@@ -802,6 +804,90 @@ class TelegramHandlers:
         # No active session — all text messages start deliberation
         if not text.startswith("/"):
             await self._start_deliberation(update, context, text, project)
+
+    async def cmd_daily_update(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Handle /daily_update command — collect planetary fingerprint via LLM agent.
+
+        Usage:
+            /daily_update              — use today's date
+            /daily_update 2026-03-01  — specific date
+            /daily_update 2026-03-01 claude  — use Claude instead of Gemini
+        """
+        from datetime import date
+
+        user_id = update.effective_user.id
+        if user_id not in settings.get_allowed_users():
+            return
+
+        if not self.daily_update_service:
+            await update.message.reply_text("❌ Daily update service not configured.")
+            return
+
+        esc = self.formatter.escape_markdown
+
+        # Parse date argument
+        target_date = date.today()
+        model = "gemini"
+
+        if context.args:
+            try:
+                target_date = date.fromisoformat(context.args[0])
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ Invalid date format. Use: `/daily_update YYYY-MM-DD`",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            if len(context.args) >= 2 and context.args[1].lower() in ("claude", "gemini"):
+                model = context.args[1].lower()
+
+        await update.message.reply_text(
+            f"🌍 Collecting planetary fingerprint for *{esc(target_date.isoformat())}* "
+            f"via {model.capitalize()}\\.\\.\\.",
+            parse_mode=ParseMode.MARKDOWN
+        )
+
+        try:
+            doc = await self.daily_update_service.run(target_date, model=model)
+
+            solar = doc.get("solar", {})
+            lunar = doc.get("lunar", {})
+            atmo = doc.get("atmospheric", {})
+            seismic = doc.get("seismic", {})
+            tides = doc.get("tides", {})
+            components = doc.get("fingerprint_components", {})
+
+            kp = solar.get("kp_index", "?")
+            phase = lunar.get("phase_name", "?").replace("_", "\\_")
+            illum = lunar.get("illumination_pct", "?")
+            wind = atmo.get("med_wind_speed_avg_kts", "?")
+            direction = atmo.get("med_dominant_wind", "?")
+            sea_state = atmo.get("med_sea_state_douglas", "?")
+            seismic_level = seismic.get("med_seismic_activity_level", "?")
+            seismic_count = seismic.get("total_events_med_24h", "?")
+            spring_neap = tides.get("spring_neap_position", "?").replace("_", "\\_")
+
+            await update.message.reply_text(
+                f"✅ *Planetary Fingerprint: {esc(target_date.isoformat())}*\n"
+                f"━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"☀️ *Solar:* Kp={kp} | Sunspots: {solar.get('sunspot_number', '?')} | "
+                f"Wind: {solar.get('solar_wind_speed_km_s', '?')} km/s\n"
+                f"🌙 *Lunar:* {phase} {illum}% | "
+                f"Dist: {solar.get('distance_km', lunar.get('distance_km', '?'))} km\n"
+                f"🌊 *Med:* {direction}{wind}kts | Sea state: {sea_state}/9 | "
+                f"Tides: {spring_neap}\n"
+                f"🌋 *Seismic:* {seismic_level} \\({seismic_count} events\\)\n\n"
+                f"📊 *Fingerprint vector* \\(16 dims\\) stored in ChromaDB\n"
+                f"💾 Saved to MongoDB collection `planetary\\_fingerprints`",
+                parse_mode=ParseMode.MARKDOWN
+            )
+
+        except Exception as e:
+            logger.error("daily_update_failed", error=str(e), date=target_date.isoformat())
+            await update.message.reply_text(
+                f"❌ Daily update failed: {esc(str(e)[:300])}"
+            )
 
     async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle document uploads — extract text and embed into ChromaDB knowledge base."""

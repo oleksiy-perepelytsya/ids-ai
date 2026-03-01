@@ -5,7 +5,9 @@ import sys
 from ids.utils import setup_logging, get_logger
 from ids.config import settings
 from ids.services import LLMClient, ClaudeCodeExecutor
+from ids.services.daily_update_service import DailyUpdateService
 from ids.storage import MongoSessionStore, MongoProjectStore, ChromaStore
+from ids.storage.fingerprint_store import FingerprintStore
 from ids.orchestrator import ConsensusBuilder, SessionManager
 from ids.orchestrator.code_workflow import CodeWorkflow
 from ids.interfaces.telegram import create_bot
@@ -50,9 +52,15 @@ async def main():
         claude_executor = ClaudeCodeExecutor()
         code_workflow = CodeWorkflow(claude_executor=claude_executor)
 
+        # Initialize daily update service
+        logger.info("initializing_daily_update_service")
+        fingerprint_store = FingerprintStore(chroma_store)
+        await fingerprint_store.ensure_indexes()
+        daily_update_service = DailyUpdateService(llm_client, fingerprint_store)
+
         # Create Telegram bot
         logger.info("initializing_telegram_bot")
-        app = create_bot(session_manager, project_store, code_workflow)
+        app = create_bot(session_manager, project_store, code_workflow, daily_update_service)
 
         # Start bot
         logger.info(
