@@ -842,51 +842,142 @@ class TelegramHandlers:
             if len(context.args) >= 2 and context.args[1].lower() in ("claude", "gemini"):
                 model = context.args[1].lower()
 
+        date_str = target_date.isoformat()
+
+        # Check if fingerprint already exists in database
+        existing = await self.daily_update_service.fingerprint_store.get(date_str)
+        if existing:
+            await update.message.reply_text(
+                f"📋 Fingerprint for *{esc(date_str)}* already exists in database. Showing stored record:",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            await self._send_fingerprint_doc(update, existing)
+            return
+
         await update.message.reply_text(
-            f"🌍 Collecting planetary fingerprint for *{esc(target_date.isoformat())}* "
-            f"via {model.capitalize()}\\.\\.\\.",
+            f"🌍 Collecting planetary fingerprint for *{esc(date_str)}* via {model.capitalize()}...",
             parse_mode=ParseMode.MARKDOWN
         )
 
         try:
             doc = await self.daily_update_service.run(target_date, model=model)
-
-            solar = doc.get("solar", {})
-            lunar = doc.get("lunar", {})
-            atmo = doc.get("atmospheric", {})
-            seismic = doc.get("seismic", {})
-            tides = doc.get("tides", {})
-            components = doc.get("fingerprint_components", {})
-
-            kp = solar.get("kp_index", "?")
-            phase = lunar.get("phase_name", "?").replace("_", "\\_")
-            illum = lunar.get("illumination_pct", "?")
-            wind = atmo.get("med_wind_speed_avg_kts", "?")
-            direction = atmo.get("med_dominant_wind", "?")
-            sea_state = atmo.get("med_sea_state_douglas", "?")
-            seismic_level = seismic.get("med_seismic_activity_level", "?")
-            seismic_count = seismic.get("total_events_med_24h", "?")
-            spring_neap = tides.get("spring_neap_position", "?").replace("_", "\\_")
-
             await update.message.reply_text(
-                f"✅ *Planetary Fingerprint: {esc(target_date.isoformat())}*\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n\n"
-                f"☀️ *Solar:* Kp={kp} | Sunspots: {solar.get('sunspot_number', '?')} | "
-                f"Wind: {solar.get('solar_wind_speed_km_s', '?')} km/s\n"
-                f"🌙 *Lunar:* {phase} {illum}% | "
-                f"Dist: {solar.get('distance_km', lunar.get('distance_km', '?'))} km\n"
-                f"🌊 *Med:* {direction}{wind}kts | Sea state: {sea_state}/9 | "
-                f"Tides: {spring_neap}\n"
-                f"🌋 *Seismic:* {seismic_level} \\({seismic_count} events\\)\n\n"
-                f"📊 *Fingerprint vector* \\(16 dims\\) stored in ChromaDB\n"
-                f"💾 Saved to MongoDB collection `planetary\\_fingerprints`",
+                f"✅ *Planetary Fingerprint stored for {esc(date_str)}*",
                 parse_mode=ParseMode.MARKDOWN
             )
+            await self._send_fingerprint_doc(update, doc)
 
         except Exception as e:
-            logger.error("daily_update_failed", error=str(e), date=target_date.isoformat())
+            logger.error("daily_update_failed", error=str(e), date=date_str)
             await update.message.reply_text(
                 f"❌ Daily update failed: {esc(str(e)[:300])}"
+            )
+
+    async def _send_fingerprint_doc(self, update: Update, doc: dict) -> None:
+        """Send a formatted planetary fingerprint document as readable Telegram messages."""
+        import json
+
+        esc = self.formatter.escape_markdown
+
+        def fmt_section(emoji: str, title: str, data: dict) -> str:
+            if not data:
+                return ""
+            lines = [f"{emoji} *{title}*"]
+            for k, v in data.items():
+                label = k.replace("_", " ").title()
+                lines.append(f"  • {esc(label)}: `{esc(str(v))}`")
+            return "\n".join(lines)
+
+        sections = []
+
+        solar = doc.get("solar", {})
+        if solar:
+            sections.append(fmt_section("☀️", "Solar", solar))
+
+        lunar = doc.get("lunar", {})
+        if lunar:
+            sections.append(fmt_section("🌙", "Lunar", lunar))
+
+        planetary = doc.get("planetary", {})
+        if planetary:
+            lines = ["🪐 *Planetary*"]
+            for planet, pdata in planetary.items():
+                lines.append(f"  *{esc(planet.capitalize())}*")
+                if isinstance(pdata, dict):
+                    for k, v in pdata.items():
+                        label = k.replace("_", " ").title()
+                        lines.append(f"    • {esc(label)}: `{esc(str(v))}`")
+                else:
+                    lines.append(f"    `{esc(str(pdata))}`")
+            sections.append("\n".join(lines))
+
+        geomagnetic = doc.get("geomagnetic", {})
+        if geomagnetic:
+            sections.append(fmt_section("🧲", "Geomagnetic", geomagnetic))
+
+        atmo = doc.get("atmospheric", {})
+        if atmo:
+            sections.append(fmt_section("🌬️", "Atmospheric (Mediterranean)", atmo))
+
+        tides = doc.get("tides", {})
+        if tides:
+            sections.append(fmt_section("🌊", "Tides", tides))
+
+        seismic = doc.get("seismic", {})
+        if seismic:
+            sections.append(fmt_section("🌋", "Seismic", seismic))
+
+        routes = doc.get("route_corridors", {})
+        if routes:
+            lines = ["🗺️ *Route Corridors*"]
+            for route, rdata in routes.items():
+                lines.append(f"  *{esc(route.replace('_', ' ').title())}*")
+                if isinstance(rdata, dict):
+                    for k, v in rdata.items():
+                        label = k.replace("_", " ").title()
+                        lines.append(f"    • {esc(label)}: `{esc(str(v))}`")
+                else:
+                    lines.append(f"    `{esc(str(rdata))}`")
+            sections.append("\n".join(lines))
+
+        components = doc.get("fingerprint_components", {})
+        if components:
+            sections.append(fmt_section("📊", "Fingerprint Vector (16 dims)", components))
+
+        meta_parts = []
+        if doc.get("updated_at"):
+            meta_parts.append(f"updated: `{doc['updated_at']}`")
+        if doc.get("source"):
+            meta_parts.append(f"source: `{doc['source']}`")
+        if doc.get("version"):
+            meta_parts.append(f"v`{doc['version']}`")
+        if meta_parts:
+            sections.append("💾 *Metadata:* " + " | ".join(meta_parts))
+
+        # Send summary in chunks respecting Telegram's 4096-char limit
+        MAX_LEN = 4000
+        chunk = "━━━━━━━━━━━━━━━━━━━━\n"
+        for section in sections:
+            candidate = chunk + section + "\n\n"
+            if len(candidate) > MAX_LEN:
+                if chunk.strip():
+                    await update.message.reply_text(chunk.strip(), parse_mode=ParseMode.MARKDOWN)
+                chunk = section + "\n\n"
+            else:
+                chunk = candidate
+        if chunk.strip():
+            await update.message.reply_text(chunk.strip(), parse_mode=ParseMode.MARKDOWN)
+
+        # Send full MongoDB object as JSON code block(s)
+        display_doc = {k: v for k, v in doc.items() if k != "_id"}
+        json_str = json.dumps(display_doc, indent=2, ensure_ascii=False, default=str)
+        MAX_JSON = 3900
+        for i in range(0, len(json_str), MAX_JSON):
+            chunk = json_str[i:i + MAX_JSON]
+            part_label = f" (part {i // MAX_JSON + 1})" if len(json_str) > MAX_JSON else ""
+            await update.message.reply_text(
+                f"*Full MongoDB document{esc(part_label)}:*\n```\n{chunk}\n```",
+                parse_mode=ParseMode.MARKDOWN
             )
 
     async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
