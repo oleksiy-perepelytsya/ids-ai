@@ -879,78 +879,80 @@ class TelegramHandlers:
 
         esc = self.formatter.escape_markdown
 
-        def fmt_section(emoji: str, title: str, data: dict) -> str:
-            if not data:
-                return ""
-            lines = [f"{emoji} *{title}*"]
+        def fmt_val(v) -> str:
+            if isinstance(v, list):
+                return ", ".join(str(i) for i in v) if v else "—"
+            return str(v)
+
+        def fmt_flat_dict(data: dict, indent: str = "  ") -> list:
+            """Flatten a dict into bullet lines, handling nested dicts and lists-of-dicts."""
+            lines = []
             for k, v in data.items():
+                if k.startswith("_"):
+                    continue
                 label = k.replace("_", " ").title()
-                lines.append(f"  • {esc(label)}: `{esc(str(v))}`")
-            return "\n".join(lines)
+                if isinstance(v, dict):
+                    lines.append(f"{indent}*{esc(label)}*")
+                    for sk, sv in v.items():
+                        if sk.startswith("_"):
+                            continue
+                        slabel = sk.replace("_", " ").title()
+                        lines.append(f"{indent}  • {esc(slabel)}: `{esc(fmt_val(sv))}`")
+                elif isinstance(v, list) and v and isinstance(v[0], dict):
+                    lines.append(f"{indent}*{esc(label)}*")
+                    for item in v:
+                        summary = ", ".join(
+                            f"{ik}={iv}" for ik, iv in item.items() if not str(ik).startswith("_")
+                        )
+                        lines.append(f"{indent}  • `{esc(summary[:120])}`")
+                else:
+                    lines.append(f"{indent}• {esc(label)}: `{esc(fmt_val(v))}`")
+            return lines
 
         sections = []
 
-        solar = doc.get("solar", {})
-        if solar:
-            sections.append(fmt_section("☀️", "Solar", solar))
+        for section_key, emoji, title in [
+            ("solar",       "☀️",  "Solar"),
+            ("lunar",       "🌙",  "Lunar"),
+            ("planetary",   "🪐",  "Planetary"),
+            ("geomagnetic", "🧲",  "Geomagnetic"),
+            ("atmospheric", "🌬️", "Atmospheric (Mediterranean)"),
+            ("tides",       "🌊",  "Tides"),
+            ("seismic",     "🌋",  "Seismic"),
+        ]:
+            data = doc.get(section_key, {})
+            if data:
+                lines = [f"{emoji} *{title}*"] + fmt_flat_dict(data)
+                sections.append("\n".join(lines))
 
-        lunar = doc.get("lunar", {})
-        if lunar:
-            sections.append(fmt_section("🌙", "Lunar", lunar))
-
-        planetary = doc.get("planetary", {})
-        if planetary:
-            lines = ["🪐 *Planetary*"]
-            for planet, pdata in planetary.items():
-                lines.append(f"  *{esc(planet.capitalize())}*")
-                if isinstance(pdata, dict):
-                    for k, v in pdata.items():
-                        label = k.replace("_", " ").title()
-                        lines.append(f"    • {esc(label)}: `{esc(str(v))}`")
-                else:
-                    lines.append(f"    `{esc(str(pdata))}`")
-            sections.append("\n".join(lines))
-
-        geomagnetic = doc.get("geomagnetic", {})
-        if geomagnetic:
-            sections.append(fmt_section("🧲", "Geomagnetic", geomagnetic))
-
-        atmo = doc.get("atmospheric", {})
-        if atmo:
-            sections.append(fmt_section("🌬️", "Atmospheric (Mediterranean)", atmo))
-
-        tides = doc.get("tides", {})
-        if tides:
-            sections.append(fmt_section("🌊", "Tides", tides))
-
-        seismic = doc.get("seismic", {})
-        if seismic:
-            sections.append(fmt_section("🌋", "Seismic", seismic))
-
-        routes = doc.get("route_corridors", {})
+        # route_corridors is a list of dicts in the schema
+        routes = doc.get("route_corridors", [])
         if routes:
             lines = ["🗺️ *Route Corridors*"]
-            for route, rdata in routes.items():
-                lines.append(f"  *{esc(route.replace('_', ' ').title())}*")
+            route_list = routes if isinstance(routes, list) else list(routes.values())
+            for rdata in route_list:
                 if isinstance(rdata, dict):
+                    name = rdata.get("name") or rdata.get("corridor_id", "?")
+                    lines.append(f"  *{esc(str(name))}*")
                     for k, v in rdata.items():
+                        if k.startswith("_") or k in ("name", "corridor_id"):
+                            continue
                         label = k.replace("_", " ").title()
-                        lines.append(f"    • {esc(label)}: `{esc(str(v))}`")
-                else:
-                    lines.append(f"    `{esc(str(rdata))}`")
+                        lines.append(f"    • {esc(label)}: `{esc(fmt_val(v))}`")
             sections.append("\n".join(lines))
 
         components = doc.get("fingerprint_components", {})
         if components:
-            sections.append(fmt_section("📊", "Fingerprint Vector (16 dims)", components))
+            lines = ["📊 *Fingerprint Vector (16 dims)*"] + fmt_flat_dict(components)
+            sections.append("\n".join(lines))
 
         meta_parts = []
         if doc.get("updated_at"):
-            meta_parts.append(f"updated: `{doc['updated_at']}`")
+            meta_parts.append(f"updated: `{esc(str(doc['updated_at']))}`")
         if doc.get("source"):
-            meta_parts.append(f"source: `{doc['source']}`")
+            meta_parts.append(f"source: `{esc(doc['source'])}`")
         if doc.get("version"):
-            meta_parts.append(f"v`{doc['version']}`")
+            meta_parts.append(f"v`{esc(str(doc['version']))}`")
         if meta_parts:
             sections.append("💾 *Metadata:* " + " | ".join(meta_parts))
 
