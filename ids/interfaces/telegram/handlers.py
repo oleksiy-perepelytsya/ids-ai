@@ -810,9 +810,12 @@ class TelegramHandlers:
         Handle /daily_update command — collect planetary fingerprint via LLM agent.
 
         Usage:
-            /daily_update              — use today's date
-            /daily_update 2026-03-01  — specific date
-            /daily_update 2026-03-01 claude  — use Claude instead of Gemini
+            /daily_update                        — use today's date
+            /daily_update 2026-03-01             — specific date
+            /daily_update 2026-03-01 claude      — use Claude instead of Gemini
+            /daily_update redo                   — force re-collect today, overwrite DB
+            /daily_update 2026-03-01 redo        — force re-collect specific date
+            /daily_update 2026-03-01 claude redo — force re-collect with Claude
         """
         from datetime import date
 
@@ -826,43 +829,53 @@ class TelegramHandlers:
 
         esc = self.formatter.escape_markdown
 
-        # Parse date argument
+        # Parse arguments — any position, order-tolerant
         target_date = date.today()
         model = "gemini"
+        redo = False
 
-        if context.args:
-            try:
-                target_date = date.fromisoformat(context.args[0])
-            except ValueError:
-                await update.message.reply_text(
-                    "❌ Invalid date format. Use: `/daily_update YYYY-MM-DD`",
-                    parse_mode=ParseMode.MARKDOWN
-                )
-                return
-            if len(context.args) >= 2 and context.args[1].lower() in ("claude", "gemini"):
-                model = context.args[1].lower()
+        for arg in (context.args or []):
+            arg_l = arg.lower()
+            if arg_l == "redo":
+                redo = True
+            elif arg_l in ("claude", "gemini"):
+                model = arg_l
+            else:
+                try:
+                    target_date = date.fromisoformat(arg)
+                except ValueError:
+                    await update.message.reply_text(
+                        "❌ Invalid argument. Usage:\n"
+                        "`/daily_update [YYYY-MM-DD] [claude|gemini] [redo]`",
+                        parse_mode=ParseMode.MARKDOWN
+                    )
+                    return
 
         date_str = target_date.isoformat()
 
-        # Check if fingerprint already exists in database
-        existing = await self.daily_update_service.fingerprint_store.get(date_str)
-        if existing:
-            await update.message.reply_text(
-                f"📋 Fingerprint for *{esc(date_str)}* already exists in database. Showing stored record:",
-                parse_mode=ParseMode.MARKDOWN
-            )
-            await self._send_fingerprint_doc(update, existing)
-            return
+        # Check if fingerprint already exists — skip if redo requested
+        if not redo:
+            existing = await self.daily_update_service.fingerprint_store.get(date_str)
+            if existing:
+                await update.message.reply_text(
+                    f"📋 Fingerprint for *{esc(date_str)}* already exists. Showing stored record:\n"
+                    f"_Use_ `/daily_update {date_str} redo` _to overwrite._",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                await self._send_fingerprint_doc(update, existing)
+                return
 
+        action_label = "Re-collecting" if redo else "Collecting"
         await update.message.reply_text(
-            f"🌍 Collecting planetary fingerprint for *{esc(date_str)}* via {model.capitalize()}...",
+            f"🌍 {action_label} planetary fingerprint for *{esc(date_str)}* via {model.capitalize()}...",
             parse_mode=ParseMode.MARKDOWN
         )
 
         try:
             doc = await self.daily_update_service.run(target_date, model=model)
+            stored_label = "updated" if redo else "stored"
             await update.message.reply_text(
-                f"✅ *Planetary Fingerprint stored for {esc(date_str)}*",
+                f"✅ *Planetary Fingerprint {stored_label} for {esc(date_str)}*",
                 parse_mode=ParseMode.MARKDOWN
             )
             await self._send_fingerprint_doc(update, doc)
@@ -970,17 +983,41 @@ class TelegramHandlers:
         if chunk.strip():
             await update.message.reply_text(chunk.strip(), parse_mode=ParseMode.MARKDOWN)
 
-        # Send full MongoDB object as JSON code block(s)
+        # Inline button to download the raw JSON document
+        from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("📥 Raw JSON", callback_data=f"fingerprint_json:{doc['date']}")
+        ]])
+        await update.message.reply_text(
+            "Tap to download the full stored document:",
+            reply_markup=keyboard
+        )
+
+    async def _send_fingerprint_json_file(self, query, date_str: str) -> None:
+        """Send the stored fingerprint document as a downloadable JSON file."""
+        import json
+        import io
+
+        if not self.daily_update_service:
+            await query.answer("Daily update service not available.", show_alert=True)
+            return
+
+        doc = await self.daily_update_service.fingerprint_store.get(date_str)
+        if not doc:
+            await query.answer(f"No fingerprint found for {date_str}.", show_alert=True)
+            return
+
         display_doc = {k: v for k, v in doc.items() if k != "_id"}
-        json_str = json.dumps(display_doc, indent=2, ensure_ascii=False, default=str)
-        MAX_JSON = 3900
-        for i in range(0, len(json_str), MAX_JSON):
-            chunk = json_str[i:i + MAX_JSON]
-            part_label = f" (part {i // MAX_JSON + 1})" if len(json_str) > MAX_JSON else ""
-            await update.message.reply_text(
-                f"*Full MongoDB document{esc(part_label)}:*\n```\n{chunk}\n```",
-                parse_mode=ParseMode.MARKDOWN
-            )
+        json_bytes = json.dumps(display_doc, indent=2, ensure_ascii=False, default=str).encode("utf-8")
+        file_obj = io.BytesIO(json_bytes)
+        file_obj.name = f"fingerprint_{date_str}.json"
+
+        await query.answer()
+        await query.message.reply_document(
+            document=file_obj,
+            filename=f"fingerprint_{date_str}.json",
+            caption=f"📄 Planetary fingerprint — {date_str}",
+        )
 
     async def handle_document(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle document uploads — extract text and embed into ChromaDB knowledge base."""
@@ -1183,6 +1220,10 @@ class TelegramHandlers:
                             "Restarting deliberation...\n"
                             "Please provide new direction or clarification."
                         )
+
+        elif data.startswith("fingerprint_json:"):
+            date_str = data.split(":", 1)[1]
+            await self._send_fingerprint_json_file(query, date_str)
 
         elif data.startswith("implement:"):
             session_id = data.split(":", 1)[1]
