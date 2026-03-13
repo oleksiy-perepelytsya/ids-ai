@@ -79,15 +79,19 @@ def create_bot(
     app.add_handler(CommandHandler("validate", handlers.cmd_validate))
     app.add_handler(CommandHandler("daily_update", handlers.cmd_daily_update))
 
+    # Exclude edited messages from all message handlers — edited_message updates
+    # have update.message=None and would crash any handler using update.message.reply_text.
+    not_edited = ~filters.UpdateType.EDITED_MESSAGE
+
     # Register message handler (for task submission)
     app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
+        filters.TEXT & ~filters.COMMAND & not_edited,
         handlers.handle_message
     ))
 
     # Register document handler (for file uploads to knowledge base)
     app.add_handler(MessageHandler(
-        filters.Document.ALL,
+        filters.Document.ALL & not_edited,
         handlers.handle_document
     ))
 
@@ -95,7 +99,7 @@ def create_bot(
     app.add_handler(CallbackQueryHandler(handlers.handle_callback))
 
     # Catch-all for unrecognised commands (e.g. typos like /learm) — must be last
-    app.add_handler(MessageHandler(filters.COMMAND, handlers.handle_unknown_command))
+    app.add_handler(MessageHandler(filters.COMMAND & not_edited, handlers.handle_unknown_command))
 
     # Register error handler — surfaces all handler exceptions to the user
     app.add_error_handler(_error_handler)

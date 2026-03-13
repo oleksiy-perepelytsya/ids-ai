@@ -84,6 +84,7 @@ class TelegramHandlers:
         project_id: str,
         chat_id: int,
         context: ContextTypes.DEFAULT_TYPE,
+        embedding_model: str = "default",
     ) -> None:
         """Background task: download URL → extract → chunk → embed → notify."""
         from ids.services.file_processor import download_url, extract_text, chunk_text
@@ -99,7 +100,7 @@ class TelegramHandlers:
                 )
                 return
             chunks = chunk_text(text)
-            stored = await self.session_manager.embed_file_chunks(project_id, filename, chunks)
+            stored = await self.session_manager.embed_file_chunks(project_id, filename, chunks, embedding_model=embedding_model)
             await context.bot.send_message(
                 chat_id=chat_id,
                 text=f"✅ *{esc(filename)}* embedded — {stored} chunk(s)",
@@ -199,7 +200,7 @@ class TelegramHandlers:
 
         if context.args:
             text = " ".join(context.args)
-            await self.session_manager.learn_from_text(project.project_id, text)
+            await self.session_manager.learn_from_text(project.project_id, text, embedding_model=project.embedding_model)
             await update.message.reply_text(
                 f"📝 Added to knowledge base for project: *{project.name}*",
                 parse_mode=ParseMode.MARKDOWN
@@ -246,16 +247,19 @@ class TelegramHandlers:
             response = await self.session_manager.run_sourcer(
                 project_id=project.project_id,
                 task=query,
+                embedding_model=project.embedding_model,
                 model=model_choice
             )
 
-            msg = [
-                f"📝 *Sourcer Response* ({model_choice})\n",
-                "━━━━━━━━━━━━━━━━━━━━\n\n",
-                response
-            ]
+            await update.message.reply_text(
+                f"📝 *Sourcer Response* ({model_choice})\n━━━━━━━━━━━━━━━━━━━━",
+                parse_mode=ParseMode.MARKDOWN,
+            )
 
-            await update.message.reply_text("".join(msg), parse_mode=ParseMode.MARKDOWN)
+            # Send response as plain text in chunks (Telegram 4096-char limit)
+            CHUNK = 4000
+            for i in range(0, len(response), CHUNK):
+                await update.message.reply_text(response[i:i + CHUNK])
 
         except Exception as e:
             logger.error("sourcer_error", error=str(e))
@@ -515,16 +519,26 @@ class TelegramHandlers:
         esc = self.formatter.escape_markdown
 
         if not context.args or len(context.args) < 2:
-            current = project.generalist_model or f"claude (default: `{esc(app_settings.claude_model)}`)"
+            current_gen = project.generalist_model or f"claude (default: `{esc(app_settings.claude_model)}`)"
+            current_emb = project.embedding_model or "default"
             await update.message.reply_text(
-                "*Agent Model Configuration*\n\n"
-                f"Current generalist model: `{esc(str(current))}`\n\n"
-                "Usage: `/set_model <role> <model>`\n\n"
-                "Roles: `generalist`\n"
-                "Models: `claude`, `gemini`\n\n"
-                "Examples:\n"
-                "`/set_model generalist gemini`\n"
-                "`/set_model generalist claude`",
+                "*Model Configuration*\n\n"
+                f"• Generalist LLM: `{esc(str(current_gen))}`\n"
+                f"• Embedding model: `{esc(current_emb)}`\n\n"
+                f"• Sourcer max tokens: `{project.sourcer_max_tokens}`\n"
+                f"• Generalist max tokens: `{project.generalist_max_tokens}`\n"
+                f"• Specialist max tokens: `{project.specialist_max_tokens}`\n\n"
+                "Usage: `/set_model <role> <value>`\n\n"
+                "*Generalist LLM:*\n"
+                "`/set_model generalist claude`\n"
+                "`/set_model generalist gemini`\n\n"
+                "*Embedding model \\(knowledge base\\):*\n"
+                "`/set_model embedding default` — all\\-MiniLM, no API key\n"
+                "`/set_model embedding ada-002` — OpenAI ada\\-002, requires OPENAI\\_API\\_KEY\n\n"
+                "*Response token limits:*\n"
+                "`/set_model sourcer_tokens 8000`\n"
+                "`/set_model generalist_tokens 4000`\n"
+                "`/set_model specialist_tokens 2000`",
                 parse_mode=ParseMode.MARKDOWN
             )
             return
@@ -532,8 +546,80 @@ class TelegramHandlers:
         role_arg = context.args[0].lower()
         model_arg = context.args[1].lower()
 
+        from datetime import datetime
+
+        # ── embedding model ───────────────────────────────────────────────────
+        if role_arg == "embedding":
+            EMBEDDING_ALIASES = {"ada-002": "ada-002", "default": "default"}
+            if model_arg not in EMBEDDING_ALIASES:
+                await update.message.reply_text(
+                    "❌ Unknown embedding model. Use `ada-002` or `default`.\n\n"
+                    "`ada-002` — OpenAI text\\-embedding\\-ada\\-002 \\(1536 dims\\)\n"
+                    "`default` — ChromaDB all\\-MiniLM\\-L6\\-v2 \\(384 dims, no API key\\)",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            if model_arg == "ada-002" and not app_settings.openai_api_key:
+                await update.message.reply_text(
+                    "❌ `OPENAI_API_KEY` is not set in your `.env`\\. Add it first\\.",
+                    parse_mode=ParseMode.MARKDOWN
+                )
+                return
+            project = await self.project_store.get_project(project.project_id)
+            project.embedding_model = model_arg
+            project.updated_at = datetime.utcnow()
+            await self.project_store.update_project(project)
+            self.user_projects[user_id] = project
+            await update.message.reply_text(
+                f"✅ *Embedding model updated*\n\n"
+                f"• Model: `{esc(model_arg)}`\n"
+                f"• Project: *{esc(project.name)}*\n\n"
+                f"⚠️ Existing collection data uses the old embedding space\\.\n"
+                f"Run `/delete_project` and re\\-import if you want a clean collection\\.",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info("embedding_model_updated", user_id=user_id, project_id=project.project_id, model=model_arg)
+            return
+
+        # ── token limits ─────────────────────────────────────────────────────
+        TOKEN_FIELDS = {
+            "sourcer_tokens":    "sourcer_max_tokens",
+            "generalist_tokens": "generalist_max_tokens",
+            "specialist_tokens": "specialist_max_tokens",
+        }
+        if role_arg in TOKEN_FIELDS:
+            try:
+                new_limit = int(context.args[1])
+                if new_limit < 100 or new_limit > 32000:
+                    raise ValueError
+            except ValueError:
+                await update.message.reply_text("❌ Token limit must be an integer between 100 and 32000.")
+                return
+            project = await self.project_store.get_project(project.project_id)
+            setattr(project, TOKEN_FIELDS[role_arg], new_limit)
+            project.updated_at = datetime.utcnow()
+            await self.project_store.update_project(project)
+            self.user_projects[user_id] = project
+            self.session_manager.invalidate_agent_cache(project.project_id)
+            await update.message.reply_text(
+                f"✅ *Token limit updated*\n\n"
+                f"• Role: `{esc(role_arg)}`\n"
+                f"• Limit: `{new_limit}` tokens\n"
+                f"• Project: *{esc(project.name)}*",
+                parse_mode=ParseMode.MARKDOWN
+            )
+            logger.info("token_limit_updated", user_id=user_id, project_id=project.project_id,
+                        role=role_arg, limit=new_limit)
+            return
+
+        # ── generalist LLM model ─────────────────────────────────────────────
         if role_arg != "generalist":
-            await update.message.reply_text("❌ Only `generalist` model is configurable. Specialists always use Gemini.")
+            await update.message.reply_text(
+                "❌ Unknown role. Use:\n"
+                "• `generalist claude|gemini` — switch LLM\n"
+                "• `embedding ada-002|default` — switch embedding model\n"
+                "• `sourcer_tokens|generalist_tokens|specialist_tokens <N>` — set token limits"
+            )
             return
 
         MODEL_ALIASES = {
@@ -552,7 +638,6 @@ class TelegramHandlers:
         # Reload from DB, update, persist
         project = await self.project_store.get_project(project.project_id)
         project.generalist_model = model_id
-        from datetime import datetime
         project.updated_at = datetime.utcnow()
         await self.project_store.update_project(project)
 
@@ -749,7 +834,7 @@ class TelegramHandlers:
                     await self.session_manager.session_store.update_session(session)
 
                     # Also store as learning pattern
-                    await self.session_manager.learn_from_text(project.project_id, f"Context (User Feedback): {text}")
+                    await self.session_manager.learn_from_text(project.project_id, f"Context (User Feedback): {text}", embedding_model=project.embedding_model)
 
                     self.awaiting_comment[user_id] = False
                     await update.message.reply_text("✅ Comment added for the next round! Click 'Continue' when ready.")
@@ -759,7 +844,7 @@ class TelegramHandlers:
         # 2. Handle Awaiting Learn (Direct data entry)
         if self.awaiting_learn.get(user_id):
             if project:
-                await self.session_manager.learn_from_text(project.project_id, text)
+                await self.session_manager.learn_from_text(project.project_id, text, embedding_model=project.embedding_model)
                 self.awaiting_learn[user_id] = False
                 await update.message.reply_text(
                     f"📝 Added to knowledge base for project: *{project.name}*",
@@ -780,7 +865,10 @@ class TelegramHandlers:
             await update.message.reply_text(f"📥 Downloading {len(urls)} file(s) in background...")
             for url in urls:
                 asyncio.create_task(
-                    self._process_url_background(url, project.project_id, update.effective_chat.id, context)
+                    self._process_url_background(
+                        url, project.project_id, update.effective_chat.id, context,
+                        embedding_model=project.embedding_model,
+                    )
                 )
             return
 
@@ -1059,6 +1147,7 @@ class TelegramHandlers:
                 project_id=project.project_id,
                 filename=filename,
                 chunks=chunks,
+                embedding_model=project.embedding_model,
             )
 
             await update.message.reply_text(

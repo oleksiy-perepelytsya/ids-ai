@@ -28,6 +28,11 @@ class Project(BaseModel):
     # Model overrides per agent role (None = use global default from settings)
     generalist_model: Optional[str] = Field(default=None, description="LLM model for generalist agent")
 
+    # Embedding model for ChromaDB knowledge base
+    # "default" = ChromaDB built-in all-MiniLM-L6-v2 (384 dims, no API key needed)
+    # "ada-002"  = OpenAI text-embedding-ada-002 (1536 dims, requires OPENAI_API_KEY)
+    embedding_model: str = Field(default="default", description="Embedding model for ChromaDB collections")
+
     # Deliberation limits (None = use global default from settings)
     max_rounds: Optional[int] = Field(default=None, description="Max deliberation rounds before dead-end")
 

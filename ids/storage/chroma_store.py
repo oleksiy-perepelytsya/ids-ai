@@ -35,30 +35,60 @@ class ChromaStore:
             logger.error("chromadb_initialization_failed", error=str(e), exc_info=True)
             raise
     
-    def get_or_create_collection(self, name: str, metadata: Dict = None):
-        """Get or create a collection"""
+    def _get_embedding_function(self, embedding_model: str = "default"):
+        """Return the ChromaDB embedding function for the given model name.
+
+        "default" → ChromaDB built-in all-MiniLM-L6-v2 (no API key needed)
+        "ada-002"  → OpenAI text-embedding-ada-002 (requires OPENAI_API_KEY)
+        """
+        if not embedding_model or embedding_model == "default":
+            return None  # ChromaDB uses its built-in default
+        if embedding_model == "ada-002":
+            from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
+            if not settings.openai_api_key:
+                raise ValueError(
+                    "OPENAI_API_KEY is not set. Add it to .env to use ada-002 embeddings."
+                )
+            return OpenAIEmbeddingFunction(
+                api_key=settings.openai_api_key,
+                model_name="text-embedding-ada-002",
+            )
+        raise ValueError(f"Unknown embedding model: {embedding_model!r}. Use 'default' or 'ada-002'.")
+
+    def get_or_create_collection(self, name: str, metadata: Dict = None, embedding_model: str = "default"):
+        """Get or create a collection, using the appropriate embedding function."""
         if not self.client:
             raise Exception("ChromaDB client not initialized. Call initialize() first.")
 
         collection_metadata = metadata or {"hnsw:space": "cosine"}
+        ef = self._get_embedding_function(embedding_model)
+
+        def _create(ef=ef):
+            kwargs = {"name": name, "metadata": collection_metadata}
+            if ef is not None:
+                kwargs["embedding_function"] = ef
+            return self.client.get_or_create_collection(**kwargs)
 
         try:
-            return self.client.get_or_create_collection(
-                name=name,
-                metadata=collection_metadata
-            )
+            return _create()
         except Exception as e:
             if "_type" in str(e):
-                # ChromaDB version mismatch: existing collection lacks '_type' in its
-                # embedding function metadata. Delete and recreate it.
                 logger.warning("collection_type_mismatch_recreating", name=name, error=str(e))
                 try:
                     self.client.delete_collection(name=name)
                 except Exception:
                     pass
-                return self.client.create_collection(name=name, metadata=collection_metadata)
+                return _create()
             logger.error("collection_get_or_create_failed", name=name, error=str(e))
             raise
+
+    def _get_collection(self, name: str, embedding_model: str = "default"):
+        """Get an existing collection with the correct embedding function."""
+        ef = self._get_embedding_function(embedding_model)
+        kwargs = {"name": name}
+        if ef is not None:
+            kwargs["embedding_function"] = ef
+        return self.client.get_collection(**kwargs)
     
     async def cache_codebase(
         self, 
@@ -176,7 +206,8 @@ class ChromaStore:
         self,
         project_id: str,
         content: str,
-        metadata: Optional[Dict] = None
+        metadata: Optional[Dict] = None,
+        embedding_model: str = "default",
     ) -> None:
         """
         Add a learning pattern (feedback or text insight) to ChromaDB.
@@ -188,7 +219,7 @@ class ChromaStore:
         """
         try:
             collection_name = f"learning_{project_id}"
-            collection = self.get_or_create_collection(collection_name)
+            collection = self.get_or_create_collection(collection_name, embedding_model=embedding_model)
 
             import uuid
             pattern_id = f"pattern_{uuid.uuid4().hex[:8]}"
@@ -217,14 +248,15 @@ class ChromaStore:
         self,
         project_id: str,
         query: str,
-        n_results: int = 5
+        n_results: int = 5,
+        embedding_model: str = "default",
     ) -> List[Dict]:
         """
         Search for relevant learning patterns.
         """
         collection_name = f"learning_{project_id}"
         try:
-            collection = self.client.get_collection(name=collection_name)
+            collection = self._get_collection(collection_name, embedding_model=embedding_model)
         except Exception:
             logger.warning("learning_store_not_found", project_id=project_id)
             return []

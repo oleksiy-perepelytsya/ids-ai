@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     # LLM API Keys
     gemini_api_key: str = Field(..., description="Google Gemini API key")
     anthropic_api_key: str = Field(..., description="Anthropic Claude API key")
+    openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key (required for ada-002 embeddings)")
 
     # LLM Model Configuration
     gemini_model: str = Field(default="gemini-2.0-flash", description="Gemini model name")

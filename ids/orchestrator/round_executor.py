@@ -17,11 +17,13 @@ class RoundExecutor:
         self,
         agents: dict,  # Dict[str, Agent]
         consensus_builder: ConsensusBuilder,
-        chroma_store: Optional[object] = None
+        chroma_store: Optional[object] = None,
+        embedding_model: str = "default",
     ):
         self.agents = agents
         self.consensus_builder = consensus_builder
         self.chroma_store = chroma_store
+        self.embedding_model = embedding_model
         logger.info("round_executor_initialized", agent_count=len(agents))
 
     async def execute_round(
@@ -53,7 +55,8 @@ class RoundExecutor:
             rag_query = "\n".join(rag_parts)
             learning_patterns = await self.chroma_store.search_learning_patterns(
                 project_id=session.project_id,
-                query=rag_query
+                query=rag_query,
+                embedding_model=self.embedding_model,
             )
             logger.info("rag_context_retrieved", count=len(learning_patterns))
 

@@ -60,7 +60,9 @@ class SessionManager:
     async def _get_executor(self, project_id: str) -> RoundExecutor:
         """Get a RoundExecutor for the given project (uses cached agents)."""
         agents = await self._get_agents(project_id)
-        return RoundExecutor(agents, self.consensus_builder, self.chroma_store)
+        project = await self.project_store.get_project(project_id)
+        embedding_model = project.embedding_model if project else "default"
+        return RoundExecutor(agents, self.consensus_builder, self.chroma_store, embedding_model=embedding_model)
 
     def invalidate_agent_cache(self, project_id: str) -> None:
         """Remove cached agents for a project (call after prompt URL changes)."""
@@ -248,17 +250,20 @@ class SessionManager:
         )
         return {"sessions_deleted": sessions_deleted, "project_deleted": project_deleted}
 
-    async def learn_from_text(self, project_id: str, text: str) -> None:
+    async def learn_from_text(self, project_id: str, text: str, embedding_model: str = "default") -> None:
         """Directly store text as learning data in ChromaDB"""
         if self.chroma_store:
             await self.chroma_store.add_learning_pattern(
                 project_id=project_id,
                 content=text,
-                metadata={"type": "direct_learning", "timestamp": datetime.utcnow().isoformat()}
+                metadata={"type": "direct_learning", "timestamp": datetime.utcnow().isoformat()},
+                embedding_model=embedding_model,
             )
             logger.info("direct_learning_added", project_id=project_id)
 
-    async def embed_file_chunks(self, project_id: str, filename: str, chunks: list[str]) -> int:
+    async def embed_file_chunks(
+        self, project_id: str, filename: str, chunks: list[str], embedding_model: str = "default"
+    ) -> int:
         """Store file text chunks as learning patterns in ChromaDB. Returns number of chunks stored."""
         if not self.chroma_store:
             return 0
@@ -277,6 +282,7 @@ class SessionManager:
                 project_id=project_id,
                 content=chunk,
                 metadata=metadata,
+                embedding_model=embedding_model,
             )
             stored += 1
 
@@ -287,7 +293,8 @@ class SessionManager:
         self,
         project_id: str,
         task: str,
-        model: str
+        model: str,
+        embedding_model: str = "default",
     ) -> str:
         """Run single-agent 'Sourcer' mode with RAG from ChromaDB + MongoDB session history"""
         agents = await self._get_agents(project_id)
@@ -300,7 +307,8 @@ class SessionManager:
         if self.chroma_store:
             learning_patterns = await self.chroma_store.search_learning_patterns(
                 project_id=project_id,
-                query=task
+                query=task,
+                embedding_model=embedding_model,
             )
 
         # MongoDB: recent consensus session history
