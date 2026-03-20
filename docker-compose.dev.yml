@@ -21,6 +21,8 @@ services:
       - mongodb
       - chromadb
       - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     command: sh -c "sleep 10 && python -m ids"
     logging:

@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 from motor.motor_asyncio import AsyncIOMotorClient
-from ids.models import DevSession, Project, SessionStatus
+from ids.models import DevSession, Project, SessionStatus, SourcerLog, PromptLibraryEntry
 from ids.config import settings
 from ids.utils import get_logger
 from .base import BaseSessionStore, BaseProjectStore
@@ -17,6 +17,8 @@ class MongoSessionStore(BaseSessionStore):
         self.client = AsyncIOMotorClient(settings.mongodb_uri)
         self.db = self.client[settings.mongodb_db]
         self.sessions = self.db.sessions
+        self.sourcer_logs = self.db.sourcer_logs
+        self.prompt_library = self.db.prompt_library
 
     async def create_session(self, session: DevSession) -> DevSession:
         """Create new session"""
@@ -116,6 +118,51 @@ class MongoSessionStore(BaseSessionStore):
             doc.pop("_id", None)
             return DevSession(**doc)
         return None
+
+    async def save_prompt_library_entry(self, entry: PromptLibraryEntry) -> None:
+        """Upsert a prompt library entry (replace if same project_id + role_name)."""
+        await self.prompt_library.replace_one(
+            {"project_id": entry.project_id, "role_name": entry.role_name},
+            entry.model_dump(),
+            upsert=True,
+        )
+        logger.info("prompt_library_saved", role_name=entry.role_name, project_id=entry.project_id)
+
+    async def get_prompt_library_entry(self, project_id: str, role_name: str) -> Optional[PromptLibraryEntry]:
+        """Retrieve a single entry by role name."""
+        doc = await self.prompt_library.find_one({"project_id": project_id, "role_name": role_name})
+        if doc:
+            doc.pop("_id", None)
+            return PromptLibraryEntry(**doc)
+        return None
+
+    async def list_prompt_library(self, project_id: str) -> List[PromptLibraryEntry]:
+        """List all stored prompts for a project, newest first."""
+        cursor = self.prompt_library.find({"project_id": project_id}, sort=[("created_at", -1)])
+        docs = await cursor.to_list(length=100)
+        result = []
+        for doc in docs:
+            doc.pop("_id", None)
+            result.append(PromptLibraryEntry(**doc))
+        return result
+
+    async def save_sourcer_log(self, log: SourcerLog) -> None:
+        """Persist a sourcer invocation record."""
+        await self.sourcer_logs.insert_one(log.model_dump())
+        logger.info("sourcer_log_saved", log_id=log.log_id, project_id=log.project_id)
+
+    async def get_sourcer_logs(self, project_id: str, limit: int = 20) -> List[SourcerLog]:
+        """Return recent sourcer logs for a project, newest first."""
+        cursor = self.sourcer_logs.find(
+            {"project_id": project_id},
+            sort=[("created_at", -1)],
+        ).limit(limit)
+        docs = await cursor.to_list(length=limit)
+        result = []
+        for doc in docs:
+            doc.pop("_id", None)
+            result.append(SourcerLog(**doc))
+        return result
 
 
 class MongoProjectStore(BaseProjectStore):

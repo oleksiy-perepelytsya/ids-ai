@@ -20,9 +20,20 @@ class Project(BaseModel):
     # Parliament prompt URLs (fetched at runtime; fallback to local persona files)
     generalist_prompt_url: Optional[str] = Field(default=None, description="URL to generalist system prompt")
     sourcer_prompt_url: Optional[str] = Field(default=None, description="URL to sourcer system prompt")
+    genprompt_prompt_url: Optional[str] = Field(default=None, description="URL to prompt-generator system prompt")
     specialist_prompt_urls: Dict[str, str] = Field(
         default_factory=dict,
         description="Map of specialist key ('1', '2', ...) to prompt URL"
+    )
+    # Inline prompt text per specialist key — takes precedence over URL when set
+    # Populated by /genprompt or /set_prompts specialist1 <role_name>
+    specialist_prompts: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of specialist key to stored prompt text (overrides URL)"
+    )
+    specialist_role_names: Dict[str, str] = Field(
+        default_factory=dict,
+        description="Map of specialist key to role name label (e.g. '1' -> 'marine_biologist')"
     )
 
     # Model overrides per agent role (None = use global default from settings)

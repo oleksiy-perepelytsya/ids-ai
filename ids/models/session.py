@@ -9,6 +9,36 @@ from .cross import MergedCross
 from .consensus import DecisionResult
 
 
+class SourcerLog(BaseModel):
+    """Record of a single /sourcer invocation"""
+    log_id: str = Field(description="Unique log identifier")
+    project_id: str
+    telegram_user_id: int
+    original_query: str = Field(description="Raw query from the user")
+    generated_prompt: Optional[str] = Field(default=None, description="Prompt produced by genprompt model")
+    genprompt_model: Optional[str] = Field(default=None, description="Model used for prompt generation")
+    search_query: str = Field(description="Query actually sent to sourcer (original or generated)")
+    sourcer_model: str = Field(description="Model used for the sourcer call")
+    response: str = Field(description="Sourcer response text")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
+class PromptLibraryEntry(BaseModel):
+    """A generated specialist system prompt stored for reuse"""
+    entry_id: str
+    project_id: str
+    role_name: str = Field(description="Specialist role identifier, e.g. 'marine_biologist'")
+    prompt: str = Field(description="Full system prompt text")
+    generator_model: str = Field(description="Model that generated this prompt")
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
 class SessionStatus(str, Enum):
     """Session lifecycle status"""
     PENDING = "pending"       # Created, not started

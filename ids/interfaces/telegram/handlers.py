@@ -224,40 +224,87 @@ class TelegramHandlers:
             await update.message.reply_text(
                 "🔍 *Sourcer Mode*\n"
                 "Usage: `/sourcer <model> <query>`\n\n"
-                "Models: `claude`, `gemini`\n"
-                "Example: `/sourcer claude what is the current db schema?`",
+                "Models: `claude`, `gemini`, `llama` (local)\n"
+                "Example: `/sourcer claude what is the current db schema?`\n"
+                "Example: `/sourcer llama summarise recent patterns`",
                 parse_mode=ParseMode.MARKDOWN
             )
             return
 
+        VALID_MODELS = ["claude", "gemini", "llama", "local"]
         model_choice = context.args[0].lower()
-        if model_choice not in ["claude", "gemini"]:
-            await update.message.reply_text("❌ Invalid model. Use `claude` or `gemini`.")
+        if model_choice not in VALID_MODELS:
+            await update.message.reply_text("❌ Invalid model. Use `claude`, `gemini`, or `llama`.")
             return
 
-        query = " ".join(context.args[1:])
+        # Parse optional -genprompt <model> flag
+        # e.g. /sourcer gemini -genprompt claude actual question
+        remaining = context.args[1:]
+        genprompt_model: Optional[str] = None
+        if len(remaining) >= 2 and remaining[0].lower() == "-genprompt":
+            gp_model = remaining[1].lower()
+            if gp_model not in VALID_MODELS:
+                await update.message.reply_text(f"❌ Invalid genprompt model `{gp_model}`. Use `claude`, `gemini`, or `llama`.")
+                return
+            genprompt_model = gp_model
+            remaining = remaining[2:]
+
+        if not remaining:
+            await update.message.reply_text("❌ Please provide a query after the model name.")
+            return
+
+        query = " ".join(remaining)
+        is_local = model_choice in ("llama", "local") or genprompt_model in ("llama", "local")
+        label = "Llama (local)" if model_choice in ("llama", "local") else model_choice
+        status_parts = [f"🔍 *Sourcer* is analyzing using *{label}*"]
+        if genprompt_model:
+            status_parts.append(f"🧠 Prompt generator: *{genprompt_model}*")
+        status_parts.append("⏳ This may take several minutes..." if is_local else "")
         await update.message.reply_text(
-            f"🔍 *Sourcer* is analyzing using *{model_choice}*...",
+            "\n".join(p for p in status_parts if p),
             parse_mode=ParseMode.MARKDOWN
         )
 
         try:
-            await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+            chat_id = update.effective_chat.id
+            typing_task = None
+            if is_local:
+                async def _keep_typing():
+                    while True:
+                        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+                        await asyncio.sleep(4)
+                typing_task = asyncio.create_task(_keep_typing())
+            else:
+                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
-            response = await self.session_manager.run_sourcer(
-                project_id=project.project_id,
-                task=query,
-                embedding_model=project.embedding_model,
-                model=model_choice
-            )
+            try:
+                response, generated_prompt = await self.session_manager.run_sourcer(
+                    project_id=project.project_id,
+                    task=query,
+                    embedding_model=project.embedding_model,
+                    model=model_choice,
+                    genprompt_model=genprompt_model,
+                    telegram_user_id=user_id,
+                )
+            finally:
+                if typing_task:
+                    typing_task.cancel()
+
+            CHUNK = 4000
+
+            # Show generated prompt if one was produced (chunked — can be long)
+            if generated_prompt:
+                await update.message.reply_text(
+                    "🧠 *Generated search prompt:*",
+                    parse_mode=ParseMode.MARKDOWN,
+                )
+                for i in range(0, len(generated_prompt), CHUNK):
+                    await update.message.reply_text(generated_prompt[i:i + CHUNK])
 
             await update.message.reply_text(
-                f"📝 *Sourcer Response* ({model_choice})\n━━━━━━━━━━━━━━━━━━━━",
+                f"📝 *Sourcer Response* ({label})\n━━━━━━━━━━━━━━━━━━━━",
                 parse_mode=ParseMode.MARKDOWN,
             )
-
-            # Send response as plain text in chunks (Telegram 4096-char limit)
-            CHUNK = 4000
             for i in range(0, len(response), CHUNK):
                 await update.message.reply_text(response[i:i + CHUNK])
 
@@ -358,7 +405,7 @@ class TelegramHandlers:
         # Switch project (store full Project object)
         self.user_projects[user_id] = project
 
-        specialist_count = len(project.specialist_prompt_urls)
+        specialist_count = len(set(project.specialist_prompt_urls) | set(project.specialist_prompts))
         await update.message.reply_text(
             f"📂 Switched to project: *{project.name}*\n"
             f"Parliament: {specialist_count} specialist(s) configured\n\n"
@@ -440,22 +487,23 @@ class TelegramHandlers:
         role_arg = context.args[0].lower()
         url = context.args[1]
 
-        # Validate URL is reachable
-        try:
-            timeout = aiohttp.ClientTimeout(total=10)
-            async with aiohttp.ClientSession(timeout=timeout) as http_client:
-                async with http_client.head(url, allow_redirects=True) as resp:
-                    if resp.status >= 400:
-                        # Try GET if HEAD fails
-                        async with http_client.get(url, allow_redirects=True) as resp2:
-                            if resp2.status >= 400:
-                                await update.message.reply_text(
-                                    f"❌ URL returned HTTP {resp2.status}. Please check the URL."
-                                )
-                                return
-        except Exception as e:
-            await update.message.reply_text(f"❌ Could not reach URL: {str(e)}")
-            return
+        # Validate URL only when the value is actually a URL
+        is_url = url.startswith("http://") or url.startswith("https://")
+        if is_url:
+            try:
+                timeout = aiohttp.ClientTimeout(total=10)
+                async with aiohttp.ClientSession(timeout=timeout) as http_client:
+                    async with http_client.head(url, allow_redirects=True) as resp:
+                        if resp.status >= 400:
+                            async with http_client.get(url, allow_redirects=True) as resp2:
+                                if resp2.status >= 400:
+                                    await update.message.reply_text(
+                                        f"❌ URL returned HTTP {resp2.status}. Please check the URL."
+                                    )
+                                    return
+            except Exception as e:
+                await update.message.reply_text(f"❌ Could not reach URL: {str(e)}")
+                return
 
         # Update project model
         # Reload from DB to get latest data
@@ -467,13 +515,46 @@ class TelegramHandlers:
         elif role_arg == "sourcer":
             project.sourcer_prompt_url = url
             role_label = "sourcer"
+        elif role_arg == "genprompt":
+            project.genprompt_prompt_url = url
+            role_label = "genprompt"
         elif re.match(r'^specialist(\d+)$', role_arg):
             key = re.match(r'^specialist(\d+)$', role_arg).group(1)
-            project.specialist_prompt_urls[key] = url
-            role_label = f"specialist_{key}"
+            if url.lower() == "rm":
+                # Remove specialist from parliament entirely
+                removed = (
+                    project.specialist_prompt_urls.pop(key, None) or
+                    project.specialist_prompts.pop(key, None)
+                )
+                project.specialist_role_names.pop(key, None)
+                if not removed:
+                    await update.message.reply_text(f"⚠️ specialist{key} was not configured.")
+                    return
+                role_label = f"specialist_{key} (removed)"
+            elif url.startswith("http://") or url.startswith("https://"):
+                project.specialist_prompt_urls[key] = url
+                project.specialist_prompts.pop(key, None)
+                project.specialist_role_names.pop(key, None)
+                role_label = f"specialist_{key} (url)"
+            else:
+                # Treat as library role name — look up stored prompt
+                entry = await self.session_manager.session_store.get_prompt_library_entry(
+                    project.project_id, url
+                )
+                if not entry:
+                    await update.message.reply_text(
+                        f"❌ No generated prompt found for role `{url}`.\n"
+                        f"Run `/genprompt <model> {url}` first to generate one.",
+                        parse_mode=ParseMode.MARKDOWN,
+                    )
+                    return
+                project.specialist_prompts[key] = entry.prompt
+                project.specialist_role_names[key] = url
+                project.specialist_prompt_urls.pop(key, None)
+                role_label = f"specialist_{key} ({url})"
         else:
             await update.message.reply_text(
-                "❌ Unknown role. Use: `generalist`, `sourcer`, `specialist1`, `specialist2`, ..."
+                "❌ Unknown role. Use: `generalist`, `sourcer`, `genprompt`, `specialist1`, `specialist2`, ..."
             )
             return
 
@@ -487,7 +568,7 @@ class TelegramHandlers:
         # Invalidate agent cache so next deliberation uses new prompts
         self.session_manager.invalidate_agent_cache(project.project_id)
 
-        specialist_count = len(project.specialist_prompt_urls)
+        specialist_count = len(set(project.specialist_prompt_urls) | set(project.specialist_prompts))
         await update.message.reply_text(
             f"✅ *Parliament updated*\n"
             f"Role `{role_label}` configured.\n"
@@ -497,6 +578,131 @@ class TelegramHandlers:
         )
 
         logger.info("prompts_updated", user_id=user_id, project_id=project.project_id, role=role_label)
+
+    async def cmd_genprompt(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """
+        Generate and store a specialist system prompt.
+
+        Usage: /genprompt <model> <role_name>
+        Example: /genprompt claude marine_biologist
+        """
+        user_id = update.effective_user.id
+        project = self._get_project(user_id)
+        if not project:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        if not context.args or len(context.args) < 2:
+            await update.message.reply_text(
+                "🧠 *Prompt Generator*\n"
+                "Usage: `/genprompt <model> <role_name>`\n\n"
+                "Example: `/genprompt claude marine_biologist`\n"
+                "Example: `/genprompt gemini sonochemistry_specialist`\n\n"
+                "Generated prompts are stored and can be assigned with:\n"
+                "`/set_prompts specialist1 marine_biologist`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            return
+
+        VALID_MODELS = ["claude", "gemini", "llama", "local"]
+        gen_model = context.args[0].lower()
+        if gen_model not in VALID_MODELS:
+            await update.message.reply_text(f"❌ Invalid model. Use: {', '.join(VALID_MODELS)}")
+            return
+
+        role_name = context.args[1].lower().replace(" ", "_")
+        extra_instruction = " ".join(context.args[2:]) if len(context.args) > 2 else ""
+        esc = self.formatter.escape_markdown
+
+        await update.message.reply_text(
+            f"🧠 Generating specialist prompt for *{esc(role_name)}* using *{gen_model}*...",
+            parse_mode=ParseMode.MARKDOWN,
+        )
+
+        try:
+            # Load genprompt system prompt (custom or built-in)
+            genprompt_system = (
+                "You are an expert AI system prompt engineer. "
+                "Generate a detailed, high-quality system prompt for a specialist agent "
+                "that will participate in a multi-agent deliberation parliament. "
+                "The prompt must include '# Role: <role name>' on the first line, "
+                "followed by deep domain expertise, analytical framework, and instructions "
+                "to provide CROSS scores (Confidence/Risk/Outcome 0-100) in responses. "
+                "Return only the system prompt text, no commentary."
+            )
+            if project.genprompt_prompt_url:
+                from ids.services.prompt_loader import fetch_or_fallback
+                custom = await fetch_or_fallback(project.genprompt_prompt_url, None)
+                if custom:
+                    genprompt_system = custom
+
+            user_msg = (
+                f"Generate a specialist system prompt for: {role_name}\n"
+                f"Project context: {project.name}"
+                + (f" — {project.description}" if project.description else "")
+                + (f"\n\nAdditional instructions: {extra_instruction}" if extra_instruction else "")
+            )
+
+            generated = await self.session_manager.llm_client.call_model(
+                model=gen_model,
+                prompt=user_msg,
+                system_prompt=genprompt_system,
+                max_tokens=3000,
+            )
+
+            # Store in MongoDB prompt library
+            from ids.models import PromptLibraryEntry
+            import uuid
+            entry = PromptLibraryEntry(
+                entry_id=f"plb_{uuid.uuid4().hex[:12]}",
+                project_id=project.project_id,
+                role_name=role_name,
+                prompt=generated,
+                generator_model=gen_model,
+            )
+            await self.session_manager.session_store.save_prompt_library_entry(entry)
+
+            await update.message.reply_text(
+                f"✅ *Prompt generated and stored* for `{esc(role_name)}`\n\n"
+                f"Assign it with: `/set_prompts specialist1 {esc(role_name)}`",
+                parse_mode=ParseMode.MARKDOWN,
+            )
+            CHUNK = 4000
+            for i in range(0, len(generated), CHUNK):
+                await update.message.reply_text(generated[i:i + CHUNK])
+
+            logger.info("genprompt_created", role_name=role_name, project_id=project.project_id, model=gen_model)
+
+        except Exception as e:
+            logger.error("genprompt_failed", error=str(e))
+            await update.message.reply_text(f"❌ Generation failed: {str(e)}")
+
+    async def cmd_list_prompts(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """List all generated prompts in the library for the active project."""
+        user_id = update.effective_user.id
+        project = self._get_project(user_id)
+        if not project:
+            await update.message.reply_text("❌ No active project. Please use /project first.")
+            return
+
+        entries = await self.session_manager.session_store.list_prompt_library(project.project_id)
+        if not entries:
+            await update.message.reply_text(
+                "📚 No generated prompts yet.\n"
+                "Use `/genprompt <model> <role_name>` to generate one."
+            )
+            return
+
+        # Build active assignments map: role_name → specialist key
+        assigned = {v: k for k, v in project.specialist_role_names.items()}
+        lines = [f"📚 Prompt Library — {project.name}\n"]
+        for e in entries:
+            slot = assigned.get(e.role_name)
+            slot_tag = f" → specialist{slot}" if slot else " (unassigned)"
+            preview = e.prompt[:100].replace("\n", " ")
+            lines.append(f"• {e.role_name}{slot_tag} [{e.generator_model}]\n  {preview}…")
+        lines.append(f"\nTotal: {len(entries)} prompt(s)")
+        await update.message.reply_text("\n".join(lines))
 
     async def cmd_set_model(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """
@@ -739,7 +945,7 @@ class TelegramHandlers:
             )],
         ])
 
-        specialist_count = len(project.specialist_prompt_urls)
+        specialist_count = len(set(project.specialist_prompt_urls) | set(project.specialist_prompts))
         await update.message.reply_text(
             f"⚠️ *Delete project '{project_name}'?*\n\n"
             f"This will permanently remove:\n"
@@ -1178,7 +1384,7 @@ class TelegramHandlers:
         user_id = update.effective_user.id
         chat_id = update.effective_chat.id
 
-        specialist_count = len(project.specialist_prompt_urls)
+        specialist_count = len(set(project.specialist_prompt_urls) | set(project.specialist_prompts))
         if specialist_count == 0:
             await update.message.reply_text(
                 "⚠️ No specialists configured for this project.\n\n"
@@ -1456,6 +1662,36 @@ class TelegramHandlers:
 
         text = update.message.text
         parts = text.split()
+
+        # /export sourcer — export last sourcer log as JSON file
+        if len(parts) > 1 and parts[1].lower() == "sourcer":
+            logs = await self.session_manager.session_store.get_sourcer_logs(
+                project.project_id, limit=1
+            )
+            if not logs:
+                await update.message.reply_text("No sourcer logs found for this project.")
+                return
+            log = logs[0]
+            import json, os
+            filename = f"sourcer_{log.log_id}.json"
+            json_str = log.model_dump_json(indent=2)
+            with open(filename, "w") as f:
+                f.write(json_str)
+            try:
+                with open(filename, "rb") as f:
+                    await update.message.reply_document(
+                        document=f,
+                        filename=filename,
+                        caption=(
+                            f"🔍 Sourcer Log: {log.log_id}\n"
+                            f"Model: {log.sourcer_model}"
+                            + (f" | GenPrompt: {log.genprompt_model}" if log.genprompt_model else "")
+                            + f"\nQuery: {log.original_query[:80]}{'...' if len(log.original_query) > 80 else ''}"
+                        ),
+                    )
+            finally:
+                os.remove(filename)
+            return
 
         if len(parts) > 1:
             try:

@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     # LLM Model Configuration
     gemini_model: str = Field(default="gemini-2.0-flash", description="Gemini model name")
     claude_model: str = Field(default="claude-sonnet-4-20250514", description="Claude model name")
+    local_llm_url: str = Field(default="http://localhost:8080", description="Local llama-server base URL")
 
     # Storage Configuration
     mongodb_uri: str = Field(default="mongodb://localhost:27017")

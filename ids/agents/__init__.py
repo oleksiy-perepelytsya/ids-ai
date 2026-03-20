@@ -41,12 +41,23 @@ async def create_agents_for_project(project: Project, llm_client: LLMClient) -> 
         max_tokens=project.sourcer_max_tokens
     )
 
-    # Specialists (Gemini) — sorted numerically by key
-    specialist_keys = sorted(project.specialist_prompt_urls.keys(), key=lambda k: int(k))
-    for key in specialist_keys:
-        url = project.specialist_prompt_urls[key]
+    # Specialists (Gemini) — union of URL keys and inline prompt keys, sorted numerically
+    all_specialist_keys = sorted(
+        set(project.specialist_prompt_urls.keys()) | set(project.specialist_prompts.keys()),
+        key=lambda k: int(k)
+    )
+    for key in all_specialist_keys:
         role_id = f"specialist_{key}"
-        specialist_prompt = await fetch_or_fallback(url, "generalist.md")
+        # Inline stored prompt takes precedence over URL
+        if key in project.specialist_prompts:
+            specialist_prompt = project.specialist_prompts[key]
+        else:
+            url = project.specialist_prompt_urls[key]
+            specialist_prompt = await fetch_or_fallback(url, "generalist.md")
+        # Use role_name label if available
+        role_name_override = project.specialist_role_names.get(key)
+        if role_name_override and "# Role:" not in specialist_prompt:
+            specialist_prompt = f"# Role: {role_name_override}\n\n{specialist_prompt}"
         agents[role_id] = Agent(
             role_id=role_id,
             system_prompt=specialist_prompt,
@@ -57,7 +68,7 @@ async def create_agents_for_project(project: Project, llm_client: LLMClient) -> 
     logger.info(
         "agents_created_for_project",
         project_id=project.project_id,
-        specialist_count=len(specialist_keys),
+        specialist_count=len(all_specialist_keys),
         total_agents=len(agents)
     )
 

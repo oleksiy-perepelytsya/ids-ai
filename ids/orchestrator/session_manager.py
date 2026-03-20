@@ -7,7 +7,8 @@ from ids.models import (
     DevSession,
     SessionStatus,
     DecisionResult,
-    ROLE_SOURCER
+    ROLE_SOURCER,
+    SourcerLog,
 )
 from ids.storage import MongoSessionStore, MongoProjectStore, ChromaStore
 from ids.orchestrator.round_executor import RoundExecutor
@@ -295,19 +296,47 @@ class SessionManager:
         task: str,
         model: str,
         embedding_model: str = "default",
-    ) -> str:
-        """Run single-agent 'Sourcer' mode with RAG from ChromaDB + MongoDB session history"""
+        genprompt_model: Optional[str] = None,
+        telegram_user_id: int = 0,
+    ) -> tuple[str, Optional[str]]:
+        """
+        Run single-agent 'Sourcer' mode with RAG from ChromaDB + MongoDB session history.
+
+        If genprompt_model is set, first calls that model to generate an optimised
+        search prompt, then uses the generated prompt for the actual sourcer call.
+
+        Returns:
+            (response_text, generated_prompt_or_None)
+        """
         agents = await self._get_agents(project_id)
         sourcer = agents.get(ROLE_SOURCER)
         if not sourcer:
             raise ValueError("Sourcer agent not initialized for this project")
 
-        # ChromaDB: semantic pattern retrieval
+        # Step 1 (optional): generate an optimised prompt
+        generated_prompt: Optional[str] = None
+        search_query = task
+        if genprompt_model:
+            project = await self.project_store.get_project(project_id)
+            genprompt_system = "You are a search-query optimisation expert. Given a user question and a knowledge base context, rewrite the question into a precise, comprehensive search query that will retrieve the most relevant information. Return only the improved query — no explanation."
+            if project and project.genprompt_prompt_url:
+                from ids.services.prompt_loader import fetch_or_fallback
+                genprompt_system = await fetch_or_fallback(project.genprompt_prompt_url, None) or genprompt_system
+            generated_prompt = await self.llm_client.call_model(
+                model=genprompt_model,
+                prompt=f"Original question:\n{task}\n\nGenerate an optimised search query for a scientific knowledge base.",
+                system_prompt=genprompt_system,
+                max_tokens=2000,
+            )
+            search_query = generated_prompt.strip()
+            logger.info("genprompt_generated", project_id=project_id, model=genprompt_model, length=len(search_query))
+
+        # Step 2: RAG retrieval using (generated or original) query
         learning_patterns = []
         if self.chroma_store:
             learning_patterns = await self.chroma_store.search_learning_patterns(
                 project_id=project_id,
-                query=task,
+                query=search_query,
                 embedding_model=embedding_model,
             )
 
@@ -333,11 +362,25 @@ class SessionManager:
             mongo_sessions=len(past_sessions)
         )
 
-        # Analyze
+        # Step 3: Sourcer analysis
         response = await sourcer.analyze(
-            task=task,
+            task=search_query,
             learning_patterns=learning_patterns,
             model_override=model
         )
 
-        return response.response
+        # Step 4: Persist log
+        log = SourcerLog(
+            log_id=f"src_{uuid.uuid4().hex[:12]}",
+            project_id=project_id,
+            telegram_user_id=telegram_user_id,
+            original_query=task,
+            generated_prompt=generated_prompt,
+            genprompt_model=genprompt_model,
+            search_query=search_query,
+            sourcer_model=model,
+            response=response.response,
+        )
+        await self.session_store.save_sourcer_log(log)
+
+        return response.response, generated_prompt
