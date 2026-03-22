@@ -113,7 +113,7 @@ class TelegramFormatter:
         msg_parts = ["📂 *Your Projects:*\n━━━━━━━━━━━━━━━━━━━━\n\n"]
 
         for project in projects:
-            specialist_count = len(project.specialist_prompt_urls)
+            specialist_count = len(set(project.specialist_prompt_urls) | set(project.specialist_prompts))
             esc = TelegramFormatter.escape_markdown
             msg_parts.append(f"• *{esc(project.name)}*")
             if project.description:
@@ -128,7 +128,11 @@ class TelegramFormatter:
     def format_project_info(project: Project, session_count: int = 0, last_session_date: str = "") -> str:
         """Format detailed project info for /project_info command"""
         esc = TelegramFormatter.escape_markdown
-        specialist_count = len(project.specialist_prompt_urls)
+        all_specialist_keys = sorted(
+            set(project.specialist_prompt_urls.keys()) | set(project.specialist_prompts.keys()),
+            key=int
+        )
+        specialist_count = len(all_specialist_keys)
 
         msg_parts = [
             f"📂 *Project: {esc(project.name)}* (`{project.project_id}`)\n",
@@ -143,9 +147,13 @@ class TelegramFormatter:
         if specialist_count == 0:
             msg_parts.append("  No specialists configured yet\\.\n")
         else:
-            for key in sorted(project.specialist_prompt_urls.keys(), key=int):
-                url = project.specialist_prompt_urls[key]
-                msg_parts.append(f"• specialist\\_{key}: `{url}`\n")
+            for key in all_specialist_keys:
+                if key in project.specialist_prompts:
+                    role_name = project.specialist_role_names.get(key, "library prompt")
+                    msg_parts.append(f"• specialist\\_{key}: `{esc(role_name)}` \\(generated\\)\n")
+                else:
+                    url = project.specialist_prompt_urls[key]
+                    msg_parts.append(f"• specialist\\_{key}: `{esc(url)}`\n")
 
         msg_parts.append("\n*Roles:*\n")
         generalist_model = esc(project.generalist_model) if project.generalist_model else "claude (default)"

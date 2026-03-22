@@ -441,7 +441,11 @@ class TelegramHandlers:
         # Append role names if agents are loaded
         if agents:
             role_lines = []
-            for key in sorted(project.specialist_prompt_urls.keys(), key=int):
+            all_keys = sorted(
+                set(project.specialist_prompt_urls.keys()) | set(project.specialist_prompts.keys()),
+                key=int
+            )
+            for key in all_keys:
                 role_id = f"specialist_{key}"
                 agent = agents.get(role_id)
                 if agent:
