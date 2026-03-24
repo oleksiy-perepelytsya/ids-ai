@@ -1,8 +1,9 @@
-# Telegram Bot Configuration
+# Telegram Bot Configuration (required only for --interface telegram)
 TELEGRAM_BOT_TOKEN=
 
-# Whitelist (comma-separated Telegram user IDs)
-ALLOWED_TELEGRAM_USERS=78634164
+# Whitelist (comma-separated user IDs)
+# Both ALLOWED_USERS and legacy ALLOWED_TELEGRAM_USERS are accepted
+ALLOWED_USERS=78634164
 
 # LLM API Keys
 GEMINI_API_KEY=

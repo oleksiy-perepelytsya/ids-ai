@@ -73,8 +73,8 @@ class SessionManager:
 
     async def create_session(
         self,
-        telegram_user_id: int,
-        telegram_chat_id: int,
+        user_id: int,
+        chat_id: int,
         task: str,
         project_id: str,
         project_name: Optional[str] = None
@@ -83,8 +83,8 @@ class SessionManager:
         Create a new deliberation session.
 
         Args:
-            telegram_user_id: User's Telegram ID
-            telegram_chat_id: Chat ID for responses
+            user_id: User identifier (interface-agnostic)
+            chat_id: Chat/channel ID for responses
             task: The question/task to deliberate on
             project_id: Required project identifier
             project_name: Display name for the project
@@ -96,8 +96,8 @@ class SessionManager:
 
         session = DevSession(
             session_id=session_id,
-            telegram_user_id=telegram_user_id,
-            telegram_chat_id=telegram_chat_id,
+            user_id=user_id,
+            chat_id=chat_id,
             task=task,
             project_id=project_id,
             project_name=project_name,
@@ -110,7 +110,7 @@ class SessionManager:
         logger.info(
             "session_created",
             session_id=session_id,
-            user_id=telegram_user_id,
+            user_id=user_id,
             project_id=project_id
         )
 
@@ -297,7 +297,7 @@ class SessionManager:
         model: str,
         embedding_model: str = "default",
         genprompt_model: Optional[str] = None,
-        telegram_user_id: int = 0,
+        user_id: int = 0,
     ) -> tuple[str, Optional[str]]:
         """
         Run single-agent 'Sourcer' mode with RAG from ChromaDB + MongoDB session history.
@@ -373,7 +373,7 @@ class SessionManager:
         log = SourcerLog(
             log_id=f"src_{uuid.uuid4().hex[:12]}",
             project_id=project_id,
-            telegram_user_id=telegram_user_id,
+            user_id=user_id,
             original_query=task,
             generated_prompt=generated_prompt,
             genprompt_model=genprompt_model,

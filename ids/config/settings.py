@@ -15,9 +15,11 @@ class Settings(BaseSettings):
         extra="ignore"
     )
 
-    # Telegram Configuration
-    telegram_bot_token: str = Field(..., description="Telegram bot token")
-    allowed_telegram_users: str = Field(..., description="Comma-separated user IDs")
+    # Interface Configuration
+    telegram_bot_token: Optional[str] = Field(default=None, description="Telegram bot token (required for Telegram interface)")
+    allowed_users: str = Field(default="", description="Comma-separated allowed user IDs")
+    # Legacy: .env files using ALLOWED_TELEGRAM_USERS still work via this field
+    allowed_telegram_users: Optional[str] = Field(default=None, description="(deprecated) use ALLOWED_USERS instead")
 
     # LLM API Keys
     gemini_api_key: str = Field(..., description="Google Gemini API key")
@@ -69,8 +71,11 @@ class Settings(BaseSettings):
         return self
 
     def get_allowed_users(self) -> List[int]:
-        """Parse allowed Telegram user IDs"""
-        return [int(uid.strip()) for uid in self.allowed_telegram_users.split(",")]
+        """Parse allowed user IDs from ALLOWED_USERS or legacy ALLOWED_TELEGRAM_USERS."""
+        raw = self.allowed_users or self.allowed_telegram_users or ""
+        if not raw.strip():
+            return []
+        return [int(uid.strip()) for uid in raw.split(",") if uid.strip()]
 
     @property
     def chromadb_url(self) -> str:

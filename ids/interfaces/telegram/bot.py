@@ -106,6 +106,7 @@ def create_bot(
     # Register error handler — surfaces all handler exceptions to the user
     app.add_error_handler(_error_handler)
 
-    logger.info("telegram_bot_created", bot_token=settings.telegram_bot_token[:10] + "...")
+    token_prefix = (settings.telegram_bot_token or "")[:10]
+    logger.info("telegram_bot_created", bot_token=token_prefix + "...")
 
     return app

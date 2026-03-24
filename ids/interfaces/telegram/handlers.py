@@ -284,7 +284,7 @@ class TelegramHandlers:
                     embedding_model=project.embedding_model,
                     model=model_choice,
                     genprompt_model=genprompt_model,
-                    telegram_user_id=user_id,
+                    user_id=user_id,
                 )
             finally:
                 if typing_task:
@@ -340,7 +340,7 @@ class TelegramHandlers:
             project_id=f"proj_{uuid.uuid4().hex[:8]}",
             name=project_name,
             description=description,
-            telegram_user_id=user_id
+            user_id=user_id
         )
 
         await self.project_store.create_project(project)
@@ -1405,8 +1405,8 @@ class TelegramHandlers:
         )
 
         session = await self.session_manager.create_session(
-            telegram_user_id=user_id,
-            telegram_chat_id=chat_id,
+            user_id=user_id,
+            chat_id=chat_id,
             task=text,
             project_id=project.project_id,
             project_name=project.name
@@ -1835,7 +1835,7 @@ class TelegramHandlers:
             result_msg = self.formatter.format_consensus_decision(session)
             reply_markup = None
             if self.code_workflow and settings.claude_code_enabled:
-                project = self._get_project(session.telegram_user_id)
+                project = self._get_project(session.user_id)
                 if project:
                     reply_markup = self.keyboards.consensus_keyboard(session.session_id)
             await target.reply_text(

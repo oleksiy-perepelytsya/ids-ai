@@ -15,7 +15,7 @@ class Project(BaseModel):
     description: Optional[str] = Field(default=None, description="Project description")
     path: Optional[str] = Field(default=None, description="Filesystem path (if applicable)")
 
-    telegram_user_id: int = Field(description="Owner's Telegram user ID")
+    user_id: int = Field(description="Owner's user ID (interface-agnostic)")
 
     # Parliament prompt URLs (fetched at runtime; fallback to local persona files)
     generalist_prompt_url: Optional[str] = Field(default=None, description="URL to generalist system prompt")

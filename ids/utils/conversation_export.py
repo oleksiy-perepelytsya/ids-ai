@@ -21,7 +21,7 @@ class ConversationExporter:
         lines = [
             f"# Deliberation Session: {session.session_id}",
             f"",
-            f"**User:** {session.telegram_user_id}",
+            f"**User:** {session.user_id}",
             f"**Project:** {session.project_name or 'General'} (`{session.project_id}`)",
             f"**Created:** {session.created_at.isoformat()}",
             f"**Status:** {session.status.value}",

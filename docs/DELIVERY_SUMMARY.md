@@ -188,8 +188,8 @@ from ids.storage import MongoSessionStore
 # Create session
 session = DevSession(
     session_id="test",
-    telegram_user_id=12345,
-    telegram_chat_id=12345,
+    user_id=12345,
+    chat_id=12345,
     task="Test question"
 )
 

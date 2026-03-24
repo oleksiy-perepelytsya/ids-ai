@@ -529,7 +529,7 @@ docker exec -it ids-mongodb mongosh
 
 use ids
 db.sessions.aggregate([
-  { $group: { _id: "$telegram_user_id", count: { $sum: 1 } } }
+  { $group: { _id: "$user_id", count: { $sum: 1 } } }
 ])
 ```
 

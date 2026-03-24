@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-IDS (Intelligent Development System) is a multi-agent AI deliberation platform accessed via Telegram. It implements a "Parliament" architecture where 6 specialist agents (Gemini 2.0 Flash) + 1 generalist agent (Claude Sonnet 4) debate questions and reach consensus using CROSS scoring (Confidence, Risk, Outcome, Standard deviation).
+IDS (Intelligent Development System) is a multi-agent AI deliberation platform with a pluggable interface layer. It implements a "Parliament" architecture where 6 specialist agents (Gemini 2.0 Flash) + 1 generalist agent (Claude Sonnet 4) debate questions and reach consensus using CROSS scoring (Confidence, Risk, Outcome, Standard deviation). The platform supports multiple transport interfaces (Telegram, CLI, with Web/MCP/WhatsApp/Viber/Email planned).
 
 **Budget target:** $10/month. Gemini handles ~90% of operations; Claude handles ~10% critical decisions.
 
@@ -13,9 +13,12 @@ IDS (Intelligent Development System) is a multi-agent AI deliberation platform a
 ## Commands
 
 ```bash
-# Run locally
+# Run locally (Telegram — default)
 poetry install
 python -m ids
+
+# Run locally (CLI REPL — no Telegram required)
+python -m ids --interface cli
 
 # Run with Docker (dev - builds locally, mounts code for live reload)
 docker compose -f docker-compose.dev.yml up
@@ -36,16 +39,26 @@ poetry run pytest
 
 ## Architecture
 
-### Deliberation Flow
+### Interface Architecture
 ```
-User (Telegram) → Bot Handlers → SessionManager → RoundExecutor
-                                                        ↓
-                                             ConsensusBuilder ← Agents (via LLMClient)
-                                                        ↓
-                                      MongoDB (sessions) + ChromaDB (learned patterns)
+User ──→ InterfaceAdapter ──→ CommandHandler ──→ SessionManager → RoundExecutor
+         (Telegram/CLI/…)    (business logic)                          ↓
+                                                          ConsensusBuilder ← Agents (via LLMClient)
+                                                                           ↓
+                                                         MongoDB (sessions) + ChromaDB (learned patterns)
 ```
 
-1. User submits a question via Telegram
+- **`ids/interfaces/base.py`** — Abstract `InterfaceAdapter` protocol + `Message`/`Reply` value objects
+- **`ids/interfaces/command_handler.py`** — Transport-agnostic command handler (all business logic)
+- **`ids/interfaces/telegram/adapter.py`** — Telegram adapter (thin wrapper over python-telegram-bot)
+- **`ids/interfaces/telegram/`** — Legacy handlers, formatters, keyboards (still functional)
+- **`ids/interfaces/cli/adapter.py`** — CLI REPL adapter (terminal-based, no external deps)
+
+To add a new interface (Web, MCP, WhatsApp, etc.): implement `InterfaceAdapter` and wire it to `CommandHandler`.
+
+### Deliberation Flow
+
+1. User submits a question via any interface
 2. `SessionManager` creates a session with project context
 3. `RoundExecutor` runs up to `MAX_ROUNDS` (default 3) deliberation rounds:
    - Generalist (Claude) frames the problem without proposing solutions
@@ -79,7 +92,11 @@ Consensus Decision → CodeWorkflow._build_consensus_prompt() → ClaudeCodeExec
 - **`ids/config/settings.py`** — Pydantic Settings loading all configuration from `.env`.
 - **`ids/storage/mongo_store.py`** — MongoDB persistence for sessions and projects.
 - **`ids/storage/chroma_store.py`** — ChromaDB vector store for knowledge base / learned patterns.
-- **`ids/interfaces/telegram/`** — Bot handlers, keyboard builders, message formatters.
+- **`ids/interfaces/base.py`** — Abstract `InterfaceAdapter` protocol defining the transport contract.
+- **`ids/interfaces/command_handler.py`** — Transport-agnostic command handler with all business logic.
+- **`ids/interfaces/cli/adapter.py`** — CLI REPL interface (terminal, no external deps).
+- **`ids/interfaces/telegram/adapter.py`** — Telegram transport adapter.
+- **`ids/interfaces/telegram/`** — Bot handlers, keyboard builders, message formatters (legacy, still used).
 
 ### Agent Roles
 
