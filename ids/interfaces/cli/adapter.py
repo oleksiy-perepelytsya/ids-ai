@@ -40,10 +40,10 @@ _CYAN = "\033[36m"
 
 
 def _strip_markdown(text: str) -> str:
-    """Best-effort conversion of Telegram-flavoured Markdown to terminal text."""
-    # Remove escape backslashes added for Telegram
-    text = text.replace("\\-", "-").replace("\\.", ".").replace("\\!", "!")
-    text = text.replace("\\_", "_").replace("\\*", "*").replace("\\`", "`").replace("\\[", "[")
+    """Best-effort conversion of Telegram-flavoured MarkdownV2 to terminal text."""
+    # Unescape all MarkdownV2 backslash escapes
+    for ch in r"_*[]()~`>#+-=|{}.!\\":
+        text = text.replace(f"\\{ch}", ch)
     return text
 
 
@@ -146,16 +146,16 @@ class CLIAdapter(InterfaceAdapter):
     def _parse_input(raw: str, user: UserContext) -> Message:
         """Parse a raw input line into a ``Message``."""
         if raw.startswith("/"):
-            parts = raw.split(maxsplit=1)
-            command = parts[0][1:]  # strip leading /
-            args_str = parts[1] if len(parts) > 1 else ""
-            # Handle callback syntax: /callback:<data>
+            # Handle callback syntax first: /callback:<data>
             if raw.startswith("/callback:"):
                 return Message(
                     text=raw,
                     user=user,
                     callback_data=raw[len("/callback:"):],
                 )
+            parts = raw.split(maxsplit=1)
+            command = parts[0][1:]  # strip leading /
+            args_str = parts[1] if len(parts) > 1 else ""
             try:
                 args = shlex.split(args_str)
             except ValueError:

@@ -39,15 +39,14 @@ from ids.utils import get_logger
 logger = get_logger(__name__)
 
 
-def _esc(text: str) -> str:
-    """Escape Markdown special chars (legacy Telegram-style).
+_MD2_ESC = re.compile(r'([_*\[\]()~`>#+\-=|{}.!\\])')
 
-    This is kept simple intentionally — each interface adapter can apply
-    its own escaping on top when translating ``Reply`` objects.
-    """
+
+def _esc(text: str) -> str:
+    """Escape all MarkdownV2 special chars in user-supplied plain text."""
     if not text:
         return ""
-    return text.replace("_", "\\_").replace("*", "\\*").replace("`", "\\`").replace("[", "\\[")
+    return _MD2_ESC.sub(r'\\\1', text)
 
 
 class CommandHandler:
@@ -131,8 +130,9 @@ class CommandHandler:
             "/cancel — Cancel the active session\n\n"
             "*Knowledge Base:*\n"
             "/learn \\[text\\] — Add text to knowledge base\n"
-            "/sourcer <model> <query> — Query knowledge base (model: claude/gemini)\n"
-            "📎 Send any file — Embed file into knowledge base (txt, md, py, pdf, ...)\n\n"
+            "/embed <filepath> — Embed a local file into knowledge base\n"
+            "/sourcer <model> <query> — Query knowledge base (model: claude/gemini/llama)\n"
+            "📎 Send any file — Embed file into knowledge base \\(txt, md, py, pdf, \\.\\.\\.\\)\n\n"
             "*Code (Claude Code integration):*\n"
             "/code <task> — Implement a task directly with Claude Code\n"
             "/analyze <filepath> — Analyze a file\n"
@@ -176,7 +176,7 @@ class CommandHandler:
             f"Configure parliament with:\n"
             f"`/set_prompts specialist1 <url>`\n"
             f"`/set_prompts specialist2 <url>`\n"
-            f"`/set_prompts generalist <url>` (optional)\n\n"
+            f"`/set_prompts generalist <url>` \\(optional\\)\n\n"
             f"Ready\\! Use `/learn`, send files, or configure specialists\\."
         )))
         logger.info("project_registered", user_id=user_id, project=project_name)
@@ -186,7 +186,7 @@ class CommandHandler:
         projects = await self.project_store.get_user_projects(user_id)
         if not projects:
             await self._reply(msg, Reply(
-                text="You have no registered projects.\n\nUse /register_project to create one.",
+                text=f"You have no registered projects (queried user_id={user_id}).\n\nUse /register_project to create one.",
                 format=MessageFormat.PLAIN,
             ))
             return
@@ -198,7 +198,7 @@ class CommandHandler:
             if p.description:
                 parts.append(f" — {_esc(p.description)}")
             parts.append(f"\n  Specialists: {sc} configured\n\n")
-        parts.append("Use /project <name> to switch.")
+        parts.append("Use /project <name> to switch\\.")
         await self._reply(msg, Reply(text="".join(parts)))
 
     async def cmd_project(self, msg: Message) -> None:
@@ -207,12 +207,12 @@ class CommandHandler:
             project = self._get_project(user_id)
             if project:
                 await self._reply(msg, Reply(text=(
-                    f"📂 Current project: *{project.name}*\n\n"
-                    f"Use /project <name> to switch."
+                    f"📂 Current project: *{_esc(project.name)}*\n\n"
+                    f"Use /project <name> to switch\\."
                 )))
             else:
                 await self._reply(msg, Reply(text=(
-                    "📂 No project selected.\n\nUse /project <name> to switch."
+                    "📂 No project selected\\.\n\nUse /project <name> to switch\\."
                 )))
             return
 
@@ -228,9 +228,9 @@ class CommandHandler:
         self.user_projects[user_id] = project
         sc = len(set(project.specialist_prompt_urls) | set(project.specialist_prompts))
         await self._reply(msg, Reply(text=(
-            f"📂 Switched to project: *{project.name}*\n"
-            f"Parliament: {sc} specialist(s) configured\n\n"
-            f"Ready for your questions!"
+            f"📂 Switched to project: *{_esc(project.name)}*\n"
+            f"Parliament: {sc} specialist\\(s\\) configured\n\n"
+            f"Ready for your questions\\!"
         )))
         logger.info("project_switched", user_id=user_id, project=project_name, project_id=project.project_id)
 
@@ -274,19 +274,19 @@ class CommandHandler:
         parts.append("\n*Roles:*\n")
         gm = _esc(project.generalist_model) if project.generalist_model else "claude (default)"
         if project.generalist_prompt_url:
-            parts.append(f"• Generalist: `{project.generalist_prompt_url}` [model: {gm}, max {project.generalist_max_tokens} tokens]\n")
+            parts.append(f"• Generalist: `{project.generalist_prompt_url}` \\[model: {gm}, max {project.generalist_max_tokens} tokens\\]\n")
         else:
-            parts.append(f"• Generalist: using default [model: {gm}, max {project.generalist_max_tokens} tokens]\n")
+            parts.append(f"• Generalist: using default \\[model: {gm}, max {project.generalist_max_tokens} tokens\\]\n")
         if project.sourcer_prompt_url:
-            parts.append(f"• Sourcer: `{project.sourcer_prompt_url}` [max {project.sourcer_max_tokens} tokens]\n")
+            parts.append(f"• Sourcer: `{project.sourcer_prompt_url}` \\[max {project.sourcer_max_tokens} tokens\\]\n")
         else:
-            parts.append(f"• Sourcer: using default [max {project.sourcer_max_tokens} tokens]\n")
+            parts.append(f"• Sourcer: using default \\[max {project.sourcer_max_tokens} tokens\\]\n")
         parts.append(f"• Specialists: max {project.specialist_max_tokens} tokens each\n")
 
         parts.append("\n*Deliberation Settings:*\n")
         mr = project.max_rounds if project.max_rounds else settings.max_rounds
         rs = "project" if project.max_rounds else "global default"
-        parts.append(f"• Max rounds: `{mr}` ({rs})\n")
+        parts.append(f"• Max rounds: `{mr}` \\({rs}\\)\n")
 
         if session_count > 0:
             parts.append(f"\n*Sessions:* {session_count} total")
@@ -309,7 +309,7 @@ class CommandHandler:
             "\n*Configure parliament with:*\n"
             "`/set_prompts specialist1 <url>`\n"
             "`/set_prompts specialist2 <url>`\n"
-            "`/set_prompts generalist <url>` (optional)\n"
+            "`/set_prompts generalist <url>` \\(optional\\)\n"
             "`/set_model generalist <claude|gemini>`\n"
             "`/set_rounds <n>`\n"
         )
@@ -327,9 +327,9 @@ class CommandHandler:
                 "*Configure Parliament Prompts*\n\n"
                 "Usage: `/set_prompts <role> <url>`\n\n"
                 "Roles:\n"
-                "• `generalist` — main synthesizer (Claude)\n"
-                "• `sourcer` — knowledge retrieval (Gemini)\n"
-                "• `specialist1`, `specialist2`, ... — domain experts (Gemini)\n\n"
+                "• `generalist` — main synthesizer \\(Claude\\)\n"
+                "• `sourcer` — knowledge retrieval \\(Gemini\\)\n"
+                "• `specialist1`, `specialist2`, \\.\\.\\. — domain experts \\(Gemini\\)\n\n"
                 "Example:\n"
                 "`/set_prompts specialist1 https://raw.githubusercontent.com/.../maritime.md`"
             )))
@@ -411,9 +411,9 @@ class CommandHandler:
         sc = len(set(project.specialist_prompt_urls) | set(project.specialist_prompts))
         await self._reply(msg, Reply(text=(
             f"✅ *Parliament updated*\n"
-            f"Role `{role_label}` configured.\n"
-            f"Parliament size: {sc} specialist(s)\n\n"
-            f"Use `/project_info` to see the full configuration."
+            f"Role `{_esc(role_label)}` configured\\.\n"
+            f"Parliament size: {sc} specialist\\(s\\)\n\n"
+            f"Use `/project_info` to see the full configuration\\."
         )))
         logger.info("prompts_updated", user_id=user_id, project_id=project.project_id, role=role_label)
 
@@ -445,7 +445,7 @@ class CommandHandler:
         extra_instruction = " ".join(msg.args[2:]) if len(msg.args) > 2 else ""
 
         await self._reply(msg, Reply(text=(
-            f"🧠 Generating specialist prompt for *{_esc(role_name)}* using *{gen_model}*..."
+            f"🧠 Generating specialist prompt for *{_esc(role_name)}* using *{_esc(gen_model)}*\\.\\.\\."
         )))
 
         try:
@@ -736,8 +736,8 @@ class CommandHandler:
             f"ID: `{session.session_id}`\n"
             f"Status: {session.status}\n"
             f"Rounds: {len(session.rounds)}\n"
-            f"Project: {session.project_name or project.name}\n\n"
-            f"*Task:*\n{session.task}"
+            f"Project: {_esc(session.project_name or project.name)}\n\n"
+            f"*Task:*\n{_esc(session.task)}"
         )))
 
     async def cmd_history(self, msg: Message) -> None:
@@ -755,8 +755,9 @@ class CommandHandler:
         parts = ["📜 *Recent Sessions:*\n━━━━━━━━━━━━━━━━━━━━\n\n"]
         for s in sessions[:5]:
             emoji = {"consensus": "✅", "dead_end": "⚠️", "cancelled": "❌", "deliberating": "⏳"}.get(s.status, "❓")
+            task_preview = _esc(s.task[:50])
             parts.append(
-                f"{emoji} {s.task[:50]}...\n"
+                f"{emoji} {task_preview}\\.\\.\\.\n"
                 f"   ID: `{s.session_id}`\n"
                 f"   Status: {s.status}\n"
                 f"   Rounds: {len(s.rounds)}\n\n"
@@ -788,10 +789,49 @@ class CommandHandler:
         if msg.args:
             text = " ".join(msg.args)
             await self.session_manager.learn_from_text(project.project_id, text, embedding_model=project.embedding_model)
-            await self._reply(msg, Reply(text=f"📝 Added to knowledge base for project: *{project.name}*"))
+            await self._reply(msg, Reply(text=f"📝 Added to knowledge base for project: *{_esc(project.name)}*"))
         else:
             self.awaiting_learn[user_id] = True
             await self._reply(msg, Reply(text="📝 Please send the text you want me to learn and store in the knowledge base.", format=MessageFormat.PLAIN))
+
+    async def cmd_embed(self, msg: Message) -> None:
+        """Embed a local file into the project knowledge base (CLI-friendly alternative to file upload)."""
+        user_id = msg.user.user_id
+        project = self._get_project(user_id)
+        if not project:
+            await self._reply(msg, Reply(text="❌ No active project. Please use /project first.", format=MessageFormat.PLAIN))
+            return
+
+        if not msg.args:
+            await self._reply(msg, Reply(
+                text="Usage: /embed <filepath>\n\nExample: /embed /data/docs/manual.pdf",
+                format=MessageFormat.PLAIN,
+            ))
+            return
+
+        filepath = " ".join(msg.args)
+        from ids.services.file_processor import extract_text, chunk_text
+        try:
+            path = Path(filepath)
+            if not path.exists():
+                await self._reply(msg, Reply(text=f"❌ File not found: {filepath}", format=MessageFormat.PLAIN))
+                return
+            file_bytes = path.read_bytes()
+            text = extract_text(path.name, file_bytes)
+            if not text.strip():
+                await self._reply(msg, Reply(text=f"⚠️ No extractable text found in: {path.name}", format=MessageFormat.PLAIN))
+                return
+            chunks = chunk_text(text)
+            stored = await self.session_manager.embed_file_chunks(
+                project.project_id, path.name, chunks, embedding_model=project.embedding_model
+            )
+            await self._reply(msg, Reply(
+                text=f"✅ *{_esc(path.name)}* embedded — {stored} chunk(s) stored in knowledge base"
+            ))
+            logger.info("file_embedded_via_embed_cmd", filepath=filepath, project_id=project.project_id, chunks=stored)
+        except Exception as e:
+            logger.error("embed_cmd_error", error=str(e), filepath=filepath)
+            await self._reply(msg, Reply(text=f"❌ Error embedding file: {e}", format=MessageFormat.PLAIN))
 
     async def cmd_sourcer(self, msg: Message) -> None:
         user_id = msg.user.user_id
@@ -840,8 +880,12 @@ class CommandHandler:
             status_parts.append("⏳ This may take several minutes...")
         await self._reply(msg, Reply(text="\n".join(p for p in status_parts if p)))
 
+        keep_typing = None
         try:
-            await self.adapter.show_typing(msg.user.chat_id)
+            if is_local:
+                keep_typing = self.adapter.make_keep_typing_task(msg.user.chat_id)
+            else:
+                await self.adapter.show_typing(msg.user.chat_id)
             response, generated_prompt = await self.session_manager.run_sourcer(
                 project_id=project.project_id,
                 task=query,
@@ -864,6 +908,9 @@ class CommandHandler:
         except Exception as e:
             logger.error("sourcer_error", error=str(e))
             await self._reply(msg, Reply(text=f"❌ Sourcer Error: {e}", format=MessageFormat.PLAIN))
+        finally:
+            if keep_typing is not None:
+                keep_typing.cancel()
 
     async def cmd_code(self, msg: Message) -> None:
         user_id = msg.user.user_id
@@ -1072,7 +1119,7 @@ class CommandHandler:
             if project:
                 await self.session_manager.learn_from_text(project.project_id, msg.text, embedding_model=project.embedding_model)
                 self.awaiting_learn[user_id] = False
-                await self._reply(msg, Reply(text=f"📝 Added to knowledge base for project: *{project.name}*"))
+                await self._reply(msg, Reply(text=f"📝 Added to knowledge base for project: *{_esc(project.name)}*"))
                 return
             else:
                 self.awaiting_learn[user_id] = False

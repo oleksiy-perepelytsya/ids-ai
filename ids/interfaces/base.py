@@ -8,6 +8,7 @@ communicate with users without knowing the underlying channel.
 from __future__ import annotations
 
 import abc
+import asyncio
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Coroutine, Optional
@@ -144,3 +145,18 @@ class InterfaceAdapter(abc.ABC):
         async def _cb(msg: str) -> None:
             await self.send(chat_id, Reply(text=msg, format=MessageFormat.MARKDOWN))
         return _cb
+
+    def make_keep_typing_task(self, chat_id: int) -> "asyncio.Task[None]":
+        """Return a background task that periodically sends a typing indicator.
+
+        Call ``task.cancel()`` when the long operation finishes.
+        Default implementation loops ``show_typing`` every 4 seconds.
+        """
+        async def _loop() -> None:
+            try:
+                while True:
+                    await self.show_typing(chat_id)
+                    await asyncio.sleep(4)
+            except asyncio.CancelledError:
+                pass
+        return asyncio.ensure_future(_loop())

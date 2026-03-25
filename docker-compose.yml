@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   ids:
     image: ghcr.io/oleksiy-perepelytsya/ids-ai:latest

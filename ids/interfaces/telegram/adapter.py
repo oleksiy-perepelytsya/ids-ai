@@ -7,6 +7,8 @@ core ``CommandHandler``.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from typing import Optional
 import io
 
@@ -35,6 +37,13 @@ from ids.config import settings
 from ids.utils import get_logger
 
 logger = get_logger(__name__)
+
+_MD2_UNESCAPE = re.compile(r'\\([_*\[\]()~`>#+\-=|{}.!\\])')
+
+
+def _strip_md2_escapes(text: str) -> str:
+    """Remove MarkdownV2 backslash escapes so the text reads cleanly as plain."""
+    return _MD2_UNESCAPE.sub(r'\1', text)
 
 
 def _buttons_to_markup(buttons: list[list]) -> Optional[InlineKeyboardMarkup]:
@@ -77,6 +86,9 @@ class TelegramAdapter(InterfaceAdapter):
     def __init__(self) -> None:
         self._app: Optional[Application] = None
         self._handler: Optional[CommandHandler] = None
+        # Stores the active CallbackQuery per chat_id so send() can edit it
+        # when reply.edit_message=True.  Cleared after each use.
+        self._pending_callback: dict[int, object] = {}
 
     def set_handler(self, handler: CommandHandler) -> None:
         self._handler = handler
@@ -86,18 +98,39 @@ class TelegramAdapter(InterfaceAdapter):
     async def send(self, chat_id: int, reply: Reply) -> None:
         if not self._app:
             return
-        parse_mode = ParseMode.MARKDOWN if reply.format == MessageFormat.MARKDOWN else None
+        parse_mode = ParseMode.MARKDOWN_V2 if reply.format == MessageFormat.MARKDOWN else None
         markup = _buttons_to_markup(reply.buttons)
 
-        # edit_message is only possible when we have the original message —
-        # in practice the Telegram handlers call query.edit_message_text directly.
-        # Here we fall back to sending a new message.
-        await self._app.bot.send_message(
-            chat_id=chat_id,
-            text=reply.text,
-            parse_mode=parse_mode,
-            reply_markup=markup,
-        )
+        query = self._pending_callback.pop(chat_id, None) if reply.edit_message else None
+        if query is not None:
+            try:
+                await query.edit_message_text(
+                    text=reply.text,
+                    parse_mode=parse_mode,
+                    reply_markup=markup,
+                )
+                return
+            except Exception:
+                pass  # fall through to send_message on any edit failure
+
+        try:
+            await self._app.bot.send_message(
+                chat_id=chat_id,
+                text=reply.text,
+                parse_mode=parse_mode,
+                reply_markup=markup,
+            )
+        except Exception as exc:
+            if parse_mode is not None:
+                # Markdown parse failure — retry as plain text with escapes stripped
+                logger.warning("send_markdown_failed_retrying_plain", chat_id=chat_id, error=str(exc))
+                await self._app.bot.send_message(
+                    chat_id=chat_id,
+                    text=_strip_md2_escapes(reply.text),
+                    reply_markup=markup,
+                )
+            else:
+                raise
 
     async def send_file(self, chat_id: int, attachment: Attachment,
                         caption: str = "") -> None:
@@ -131,6 +164,11 @@ class TelegramAdapter(InterfaceAdapter):
         await self._app.start()
         await self._app.updater.start_polling()
         logger.info("telegram_bot_running")
+        # Block until shutdown (mirrors the old asyncio.Event().wait() pattern)
+        try:
+            await asyncio.Event().wait()
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            pass
 
     async def stop(self) -> None:
         if self._app:
@@ -155,7 +193,7 @@ class TelegramAdapter(InterfaceAdapter):
             "start", "help", "register_project", "list_projects", "project",
             "project_info", "set_prompts", "genprompt", "list_prompts",
             "set_model", "set_rounds", "delete_project", "status", "history",
-            "cancel", "export", "sourcer", "learn", "code", "analyze",
+            "cancel", "export", "sourcer", "learn", "embed", "code", "analyze",
             "validate", "daily_update",
         ]
         for cmd in COMMANDS:
@@ -201,7 +239,16 @@ class TelegramAdapter(InterfaceAdapter):
             msg.command = cmd_name
             handler_fn = getattr(self._handler, f"cmd_{cmd_name}", None)
             if handler_fn:
-                await handler_fn(msg)
+                try:
+                    await handler_fn(msg)
+                except Exception as exc:
+                    logger.error("command_handler_error", cmd=cmd_name, error=str(exc), exc_info=True)
+                    try:
+                        await update.effective_message.reply_text(
+                            f"❌ Error in /{cmd_name}: {str(exc)[:300]}"
+                        )
+                    except Exception:
+                        pass
         return _wrapper
 
     async def _wrap_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -224,9 +271,13 @@ class TelegramAdapter(InterfaceAdapter):
         query = update.callback_query
         await query.answer()
 
+        chat_id = update.effective_chat.id
+        # Register so send() can edit this message when reply.edit_message=True
+        self._pending_callback[chat_id] = query
+
         user = UserContext(
             user_id=update.effective_user.id,
-            chat_id=update.effective_chat.id,
+            chat_id=chat_id,
             username=update.effective_user.username,
             raw=update,
         )
@@ -237,6 +288,8 @@ class TelegramAdapter(InterfaceAdapter):
             raw=query,
         )
         await self._handler.handle_callback(msg)
+        # Clear any unused pending callback
+        self._pending_callback.pop(chat_id, None)
 
     async def _wrap_unknown_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = _update_to_message(update, context)

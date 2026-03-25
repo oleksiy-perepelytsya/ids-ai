@@ -67,8 +67,9 @@ async def _init_core():
 
 
 async def _run_telegram(session_manager, project_store, code_workflow, daily_update_service):
-    """Start IDS with the Telegram interface (backward-compatible path)."""
-    from ids.interfaces.telegram import create_bot
+    """Start IDS with the Telegram interface via TelegramAdapter + CommandHandler."""
+    from ids.interfaces.telegram import TelegramAdapter
+    from ids.interfaces.command_handler import CommandHandler
 
     if not settings.telegram_bot_token:
         logger.error("telegram_bot_token_missing")
@@ -76,7 +77,16 @@ async def _run_telegram(session_manager, project_store, code_workflow, daily_upd
         sys.exit(1)
 
     logger.info("initializing_telegram_bot")
-    app = create_bot(session_manager, project_store, code_workflow, daily_update_service)
+    adapter = TelegramAdapter()
+    handler = CommandHandler(
+        session_manager=session_manager,
+        project_store=project_store,
+        adapter=adapter,
+        code_workflow=code_workflow,
+        daily_update_service=daily_update_service,
+    )
+    adapter.set_handler(handler)
+    adapter.build_app()
 
     logger.info(
         "ids_ready",
@@ -89,19 +99,12 @@ async def _run_telegram(session_manager, project_store, code_workflow, daily_upd
         parliament="dynamic_per_project",
     )
 
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling()
-    logger.info("telegram_bot_running")
-
     try:
-        await asyncio.Event().wait()
+        await adapter.start()
     except KeyboardInterrupt:
         logger.info("shutdown_signal_received")
     finally:
-        await app.updater.stop()
-        await app.stop()
-        await app.shutdown()
+        await adapter.stop()
 
 
 async def _run_cli(session_manager, project_store, code_workflow, daily_update_service):
