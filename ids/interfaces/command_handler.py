@@ -110,37 +110,113 @@ class CommandHandler:
         logger.info("user_started", user_id=user_id)
 
     async def cmd_help(self, msg: Message) -> None:
-        await self._reply(msg, Reply(text=(
-            "*IDS Commands*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "*Project Management:*\n"
-            "/register\\_project <name> \\[desc\\] — Register a new project\n"
-            "/list\\_projects — List all your projects\n"
-            "/project \\[name\\] — Show or switch active project\n"
-            "/project\\_info — Show parliament config and session stats\n"
-            "/set\\_prompts <role> <url> — Configure specialist/generalist/sourcer prompts\n"
-            "/set\\_model generalist <claude|gemini> — Switch generalist LLM model\n"
-            "/set\\_rounds <n> — Set max deliberation rounds before dead\\-end\n"
-            "/delete\\_project <name> — Remove project and all its data\n\n"
-            "*Deliberation:*\n"
-            "💬 Send any text — Start a parliament deliberation\n"
-            "/status — Show active session info\n"
-            "/history — View past sessions for current project\n"
-            "/export \\[n\\] — Export session as JSON file\n"
-            "/cancel — Cancel the active session\n\n"
-            "*Knowledge Base:*\n"
-            "/learn \\[text\\] — Add text to knowledge base\n"
-            "/embed <filepath> — Embed a local file into knowledge base\n"
-            "/sourcer <model> <query> — Query knowledge base (model: claude/gemini/llama)\n"
-            "📎 Send any file — Embed file into knowledge base \\(txt, md, py, pdf, \\.\\.\\.\\)\n\n"
-            "*Code (Claude Code integration):*\n"
-            "/code <task> — Implement a task directly with Claude Code\n"
-            "/analyze <filepath> — Analyze a file\n"
-            "/validate — Validate recent changes\n\n"
-            "*Other:*\n"
-            "/start — Welcome message\n"
-            "/help — Show this help"
-        )))
+        if not msg.args:
+            # No question — show commands overview with invitation to ask
+            await self._reply(msg, Reply(text=(
+                "*IDS Commands*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n\n"
+                "*Project Management:*\n"
+                "/register\\_project <name> \\[desc\\] — Register a new project\n"
+                "/list\\_projects — List all your projects\n"
+                "/project \\[name\\] — Show or switch active project\n"
+                "/project\\_info — Show parliament config and session stats\n"
+                "/set\\_prompts <role> <url> — Configure specialist/generalist/sourcer prompts\n"
+                "/set\\_model generalist <claude|gemini> — Switch generalist LLM model\n"
+                "/set\\_rounds <n> — Set max deliberation rounds before dead\\-end\n"
+                "/delete\\_project <name> — Remove project and all its data\n\n"
+                "*Deliberation:*\n"
+                "💬 Send any text — Start a parliament deliberation\n"
+                "/status — Show active session info\n"
+                "/history — View past sessions for current project\n"
+                "/export \\[n\\] — Export session as JSON file\n"
+                "/cancel — Cancel the active session\n\n"
+                "*Knowledge Base:*\n"
+                "/learn \\[text\\] — Add text to knowledge base\n"
+                "/embed <filepath> — Embed a local file into knowledge base\n"
+                "/sourcer <model> <query> — Query knowledge base \\(model: claude/gemini/llama\\)\n"
+                "📎 Send any file — Embed file into knowledge base \\(txt, md, py, pdf, \\.\\.\\.\\)\n\n"
+                "*Code \\(Claude Code integration\\):*\n"
+                "/code <task> — Implement a task directly with Claude Code\n"
+                "/analyze <filepath> — Analyze a file\n"
+                "/validate — Validate recent changes\n\n"
+                "*Other:*\n"
+                "/start — Welcome message\n"
+                "/help — Show this help\n"
+                "/daily\\_update — Collect planetary fingerprint\n\n"
+                "💡 *Ask me anything:* `/help <your question>`\n"
+                "Models: `/help claude|gemini|llama <question>` \\(default: gemini\\)\n"
+                "Example: `/help how do I add a specialist?`"
+            )))
+            return
+
+        # Parse optional model prefix (same pattern as /sourcer)
+        VALID_MODELS = ["claude", "gemini", "llama", "local"]
+        remaining = list(msg.args)
+        model = "gemini"  # default — budget-friendly
+        if remaining[0].lower() in VALID_MODELS:
+            model = remaining.pop(0).lower()
+
+        if not remaining:
+            await self._reply(msg, Reply(
+                text="❓ Please provide a question after the model name\\.\n"
+                     "Example: `/help gemini how do I configure specialists?`",
+            ))
+            return
+
+        question = " ".join(remaining)
+        user_id = msg.user.user_id
+
+        is_local = model in ("llama", "local")
+        label = "Llama (local)" if is_local else model.capitalize()
+        await self._reply(msg, Reply(text=f"🤖 *Thinking* \\({_esc(label)}\\)\\.\\.\\." ))
+
+        keep_typing = None
+        try:
+            if is_local:
+                keep_typing = self.adapter.make_keep_typing_task(msg.user.chat_id)
+            else:
+                await self.adapter.show_typing(msg.user.chat_id)
+
+            # Load hostess prompt from persona file
+            from ids.services.prompt_loader import load_fallback_prompt
+            system_prompt = load_fallback_prompt("hostess.md")
+
+            # Gather rich context via dedicated service
+            from ids.services.hostess_context import build_hostess_context
+            user_context = await build_hostess_context(
+                user_id=user_id,
+                project=self._get_project(user_id),
+                question=question,
+                session_store=self.session_manager.session_store,
+                project_store=self.project_store,
+                chroma_store=self.session_manager.chroma_store,
+            )
+
+            response = await self.session_manager.llm_client.call_model(
+                model=model,
+                prompt=(
+                    f"User question: {question}\n\n"
+                    f"Current user context:\n{user_context}"
+                ),
+                system_prompt=system_prompt,
+                max_tokens=2000,
+            )
+
+            CHUNK = 4000
+            for i in range(0, len(response), CHUNK):
+                await self._reply(msg, Reply(
+                    text=response[i:i + CHUNK],
+                    format=MessageFormat.PLAIN,
+                ))
+        except Exception as e:
+            logger.error("help_hostess_error", error=str(e))
+            await self._reply(msg, Reply(
+                text=f"❌ Sorry, I couldn't process your question: {e}",
+                format=MessageFormat.PLAIN,
+            ))
+        finally:
+            if keep_typing is not None:
+                keep_typing.cancel()
 
     async def cmd_register_project(self, msg: Message) -> None:
         user_id = msg.user.user_id
