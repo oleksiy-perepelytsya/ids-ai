@@ -1,10 +1,11 @@
-"""Fingerprint store — persists daily planetary fingerprints to MongoDB + ChromaDB."""
+"""Fingerprint store — persists daily planetary fingerprints to MongoDB + Qdrant."""
 
 import os
 import sys
 from typing import Optional
 from motor.motor_asyncio import AsyncIOMotorClient
 from ids.config import settings
+from ids.search.backend import VectorDoc
 from ids.utils import get_logger
 
 logger = get_logger(__name__)
@@ -42,10 +43,11 @@ COLLECTION_NAME = "planetary_fingerprints"
 
 
 class FingerprintStore:
-    """Stores daily planetary fingerprints in MongoDB and ChromaDB."""
+    """Stores daily planetary fingerprints in MongoDB and Qdrant."""
 
-    def __init__(self, chroma_store):
-        self.chroma = chroma_store
+    def __init__(self, vectors):
+        """Accept a QdrantBackend (or any SearchBackend) for vector ops."""
+        self.vectors = vectors
         self.client = AsyncIOMotorClient(settings.mongodb_uri)
         self.db = self.client[settings.mongodb_db]
         self.collection = self.db[COLLECTION_NAME]
@@ -63,7 +65,7 @@ class FingerprintStore:
         """
         Store a daily fingerprint document.
 
-        Priority for ChromaDB embedding:
+        Priority for vector embedding:
         1. Use chromadb_ready.embedding returned by the agent (22-dim, pre-computed)
         2. Fall back to building vector from fingerprint_components dict
         3. Fall back to build_fingerprint_vector() from schema helpers
@@ -114,21 +116,22 @@ class FingerprintStore:
         )
         logger.info("fingerprint_mongo_upserted", date=date_str)
 
-        # --- ChromaDB upsert with embedding vector ---
+        # --- Qdrant upsert with embedding vector ---
         try:
-            chroma_collection = self.chroma.get_or_create_collection(
-                COLLECTION_NAME,
-                metadata={"hnsw:space": "cosine"}
+            fp_doc = VectorDoc(
+                id=date_str,
+                text=chroma_doc,
+                vectors={"fp22": vector},
+                payload=metadata,
             )
-            chroma_collection.upsert(
-                ids=[date_str],
-                embeddings=[vector],
-                documents=[chroma_doc],
-                metadatas=[metadata],
+            await self.vectors.upsert(
+                namespace=COLLECTION_NAME,
+                docs=[fp_doc],
+                embedding_model="fp22",
             )
-            logger.info("fingerprint_chroma_upserted", date=date_str, dims=len(vector))
+            logger.info("fingerprint_qdrant_upserted", date=date_str, dims=len(vector))
         except Exception as e:
-            logger.error("fingerprint_chroma_failed", date=date_str, error=str(e))
+            logger.error("fingerprint_qdrant_failed", date=date_str, error=str(e))
 
         return doc
 
@@ -141,7 +144,7 @@ class FingerprintStore:
 
     async def find_similar(self, date_str: str, n: int = 5) -> list:
         """
-        Find historically similar days using ChromaDB vector similarity.
+        Find historically similar days using vector similarity search.
         Builds query vector from fingerprint_components in canonical dimension order.
         Returns list of dicts with date, distance, summary.
         """
@@ -159,20 +162,20 @@ class FingerprintStore:
             return []
 
         try:
-            chroma_collection = self.chroma.get_or_create_collection(COLLECTION_NAME)
-            results = chroma_collection.query(
-                query_embeddings=[vector],
-                n_results=n + 1,  # +1 to exclude self
-                include=["documents", "metadatas", "distances"],
+            hits = await self.vectors.search(
+                namespace=COLLECTION_NAME,
+                query=vector,
+                n=n + 1,  # +1 to exclude self
+                embedding_model="fp22",
             )
             similar = []
-            for i, doc_id in enumerate(results["ids"][0]):
-                if doc_id == date_str:
+            for h in hits:
+                if h.id == date_str:
                     continue
                 similar.append({
-                    "date": doc_id,
-                    "distance": round(results["distances"][0][i], 4),
-                    "summary": results["documents"][0][i],
+                    "date": h.id,
+                    "distance": round(1.0 - h.score, 4) if h.score else 0.0,
+                    "summary": h.content,
                 })
             return similar[:n]
         except Exception as e:

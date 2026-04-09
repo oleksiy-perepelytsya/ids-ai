@@ -12,8 +12,8 @@ ANTHROPIC_API_KEY=
 # Storage Configuration
 MONGODB_URI=mongodb://mongodb:27017
 MONGODB_DB=ids
-CHROMADB_HOST=chromadb
-CHROMADB_PORT=8000
+QDRANT_HOST=qdrant
+QDRANT_PORT=6333
 REDIS_URL=redis://redis:6379
 
 # Behavior Configuration

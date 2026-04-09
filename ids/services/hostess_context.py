@@ -15,7 +15,8 @@ from ids.utils import get_logger
 
 if TYPE_CHECKING:
     from ids.models import Project
-    from ids.storage import ChromaStore, MongoProjectStore, MongoSessionStore
+    from ids.search import SearchOrchestrator
+    from ids.storage import MongoProjectStore, MongoSessionStore
 
 logger = get_logger(__name__)
 
@@ -136,15 +137,15 @@ async def collect_prompt_library(
 
 
 async def collect_kb_search(
-    chroma_store: Optional[ChromaStore],
+    search: Optional[SearchOrchestrator],
     project: Project,
     query: str,
 ) -> Optional[str]:
     """Search the project knowledge base for snippets related to the query."""
-    if not chroma_store:
+    if not search:
         return None
     try:
-        results = await chroma_store.search_learning_patterns(
+        results = await search.search_learning_patterns(
             project.project_id, query, n_results=3,
             embedding_model=project.embedding_model,
         )
@@ -188,7 +189,7 @@ async def build_hostess_context(
     question: str,
     session_store: MongoSessionStore,
     project_store: MongoProjectStore,
-    chroma_store: Optional[ChromaStore],
+    search: Optional[SearchOrchestrator] = None,
 ) -> str:
     """Assemble the full context string passed to the hostess LLM.
 
@@ -209,7 +210,7 @@ async def build_hostess_context(
         # Async collectors that need a project
         for fn, kwargs in _async_project_collectors(
             session_store=session_store,
-            chroma_store=chroma_store,
+            search=search,
             user_id=user_id,
             project=project,
             question=question,
@@ -240,7 +241,7 @@ _SYNC_PROJECT_COLLECTORS = [
 
 def _async_project_collectors(
     session_store: MongoSessionStore,
-    chroma_store: Optional[ChromaStore],
+    search: Optional[SearchOrchestrator],
     user_id: int,
     project: Project,
     question: str,
@@ -260,6 +261,6 @@ def _async_project_collectors(
             session_store=session_store, project=project,
         )),
         (collect_kb_search, dict(
-            chroma_store=chroma_store, project=project, query=question,
+            search=search, project=project, query=question,
         )),
     ]

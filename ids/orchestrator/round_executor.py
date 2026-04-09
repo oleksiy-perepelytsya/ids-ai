@@ -17,12 +17,12 @@ class RoundExecutor:
         self,
         agents: dict,  # Dict[str, Agent]
         consensus_builder: ConsensusBuilder,
-        chroma_store: Optional[object] = None,
-        embedding_model: str = "default",
+        search: Optional[object] = None,
+        embedding_model: str = "minilm",
     ):
         self.agents = agents
         self.consensus_builder = consensus_builder
-        self.chroma_store = chroma_store
+        self.search = search
         self.embedding_model = embedding_model
         logger.info("round_executor_initialized", agent_count=len(agents))
 
@@ -36,7 +36,7 @@ class RoundExecutor:
         Execute a deliberation round.
 
         Uniform flow (every round):
-        1. RAG: retrieve learning patterns from ChromaDB
+        1. RAG: retrieve learning patterns from vector store
         2. Specialists analyze (parallel or sequential)
         3. Generalist synthesizes specialist responses
         4. Merge CROSS scores (all agents)
@@ -46,14 +46,14 @@ class RoundExecutor:
 
         # Step 1: RAG retrieval
         learning_patterns = []
-        if self.chroma_store:
+        if self.search:
             rag_parts = [session.task]
             if session.context:
                 rag_parts.append(session.context)
             if session.rounds:
                 rag_parts.append(session.rounds[-1].generalist_response.response)
             rag_query = "\n".join(rag_parts)
-            learning_patterns = await self.chroma_store.search_learning_patterns(
+            learning_patterns = await self.search.search_learning_patterns(
                 project_id=session.project_id,
                 query=rag_query,
                 embedding_model=self.embedding_model,

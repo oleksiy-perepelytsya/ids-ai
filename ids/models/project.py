@@ -1,8 +1,22 @@
 """Project/context models"""
 
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, List, Optional
+
 from pydantic import BaseModel, Field
+
+
+class DataSourceConfig(BaseModel):
+    """Inline copy of DataSource for Mongo serialisation (avoids circular import)."""
+    name: str
+    kind: str
+    backend: str = "qdrant"
+    namespace: str
+    embedding_model: str | None = None
+    priority: int = 0
+    filters: dict = Field(default_factory=dict)
 
 
 class Project(BaseModel):
@@ -39,10 +53,17 @@ class Project(BaseModel):
     # Model overrides per agent role (None = use global default from settings)
     generalist_model: Optional[str] = Field(default=None, description="LLM model for generalist agent")
 
-    # Embedding model for ChromaDB knowledge base
-    # "default" = ChromaDB built-in all-MiniLM-L6-v2 (384 dims, no API key needed)
-    # "ada-002"  = OpenAI text-embedding-ada-002 (1536 dims, requires OPENAI_API_KEY)
-    embedding_model: str = Field(default="default", description="Embedding model for ChromaDB collections")
+    # Embedding model — registry key (e.g. "minilm", "ada", "bge-large")
+    # Governs the learning_{project_id} collection.  Legacy values "default"
+    # and "ada-002" are resolved via embeddings.resolve_embedding_key().
+    embedding_model: str = Field(default="minilm", description="Embedding model registry key")
+
+    # Searchable data sources bound to this project.
+    # When empty, SearchOrchestrator falls back to a single learning_ collection.
+    data_sources: List[DataSourceConfig] = Field(
+        default_factory=list,
+        description="Declared search sources (learning, corpus, graph, …)",
+    )
 
     # Deliberation limits (None = use global default from settings)
     max_rounds: Optional[int] = Field(default=None, description="Max deliberation rounds before dead-end")

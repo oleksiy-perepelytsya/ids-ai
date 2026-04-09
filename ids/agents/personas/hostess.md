@@ -79,7 +79,7 @@ Budget target: $10/month. Gemini handles ~90% of operations; Claude handles ~10%
 
 ### Storage
 - **MongoDB** — Sessions, projects, sourcer logs, prompt library
-- **ChromaDB** — Vector knowledge base (learning patterns, embedded files/codebase)
+- **Qdrant** — Vector knowledge base (learning patterns, corpus, fingerprints)
 - **Redis** — Optional caching
 
 ### Interfaces

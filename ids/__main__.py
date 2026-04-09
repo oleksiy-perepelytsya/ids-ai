@@ -28,10 +28,14 @@ def _parse_args() -> argparse.Namespace:
 
 async def _init_core():
     """Initialise storage, services, and orchestrator — shared by all interfaces."""
+    from qdrant_client import AsyncQdrantClient
+
     from ids.services import LLMClient, ClaudeCodeExecutor
     from ids.services.daily_update_service import DailyUpdateService
-    from ids.storage import MongoSessionStore, MongoProjectStore, ChromaStore
+    from ids.storage import MongoSessionStore, MongoProjectStore
     from ids.storage.fingerprint_store import FingerprintStore
+    from ids.search import SearchOrchestrator
+    from ids.search.backends import QdrantBackend
     from ids.orchestrator import ConsensusBuilder, SessionManager
     from ids.orchestrator.code_workflow import CodeWorkflow
 
@@ -41,8 +45,13 @@ async def _init_core():
     logger.info("initializing_storage")
     session_store = MongoSessionStore()
     project_store = MongoProjectStore()
-    chroma_store = ChromaStore()
-    await chroma_store.initialize()
+
+    logger.info("initializing_qdrant")
+    qdrant_client = AsyncQdrantClient(
+        host=settings.qdrant_host, port=settings.qdrant_port,
+    )
+    qdrant_backend = QdrantBackend(qdrant_client)
+    search = SearchOrchestrator(backends={"qdrant": qdrant_backend})
 
     logger.info("initializing_orchestrator")
     consensus_builder = ConsensusBuilder()
@@ -51,7 +60,7 @@ async def _init_core():
         consensus_builder=consensus_builder,
         session_store=session_store,
         project_store=project_store,
-        chroma_store=chroma_store,
+        search=search,
     )
 
     logger.info("initializing_claude_code")
@@ -59,7 +68,7 @@ async def _init_core():
     code_workflow = CodeWorkflow(claude_executor=claude_executor)
 
     logger.info("initializing_daily_update_service")
-    fingerprint_store = FingerprintStore(chroma_store)
+    fingerprint_store = FingerprintStore(qdrant_backend)
     await fingerprint_store.ensure_indexes()
     daily_update_service = DailyUpdateService(llm_client, fingerprint_store)
 

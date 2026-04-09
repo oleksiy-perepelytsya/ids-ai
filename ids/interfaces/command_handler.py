@@ -189,7 +189,7 @@ class CommandHandler:
                 question=question,
                 session_store=self.session_manager.session_store,
                 project_store=self.project_store,
-                chroma_store=self.session_manager.chroma_store,
+                search=self.session_manager.search,
             )
 
             response = await self.session_manager.llm_client.call_model(
@@ -610,7 +610,7 @@ class CommandHandler:
 
         if len(msg.args) < 2:
             current_gen = project.generalist_model or f"claude (default: `{_esc(settings.claude_model)}`)"
-            current_emb = project.embedding_model or "default"
+            current_emb = project.embedding_model or "minilm"
             await self._reply(msg, Reply(text=(
                 "*Model Configuration*\n\n"
                 f"• Generalist LLM: `{_esc(str(current_gen))}`\n"
@@ -637,12 +637,12 @@ class CommandHandler:
 
         # Embedding model
         if role_arg == "embedding":
-            EMBEDDING_ALIASES = {"ada-002": "ada-002", "default": "default"}
-            if model_arg not in EMBEDDING_ALIASES:
+            from ids.search.embeddings import EMBEDDING_REGISTRY, _ALIASES
+            valid_keys = set(EMBEDDING_REGISTRY) | set(_ALIASES)
+            if model_arg not in valid_keys:
+                keys_str = ", ".join(f"`{k}`" for k in sorted(EMBEDDING_REGISTRY))
                 await self._reply(msg, Reply(text=(
-                    "❌ Unknown embedding model. Use `ada-002` or `default`.\n\n"
-                    "`ada-002` — OpenAI text\\-embedding\\-ada\\-002 \\(1536 dims\\)\n"
-                    "`default` — ChromaDB all\\-MiniLM\\-L6\\-v2 \\(384 dims, no API key\\)"
+                    f"❌ Unknown embedding model\\. Available: {_esc(keys_str)}"
                 )))
                 return
             if model_arg == "ada-002" and not settings.openai_api_key:
@@ -768,7 +768,7 @@ class CommandHandler:
         if not msg.args:
             await self._reply(msg, Reply(text=(
                 "Usage: `/delete_project <name>`\n\n"
-                "This removes the project, all its sessions, and all ChromaDB data."
+                "This removes the project, all its sessions, and all vector data."
             )))
             return
 
@@ -785,7 +785,7 @@ class CommandHandler:
                 f"This will permanently remove:\n"
                 f"• The project and its {sc} specialist prompt(s)\n"
                 f"• All deliberation sessions\n"
-                f"• All ChromaDB learning data\n\n"
+                f"• All learning data \\(vector store\\)\n\n"
                 f"*This cannot be undone.*"
             ),
             buttons=[
@@ -1298,7 +1298,7 @@ class CommandHandler:
                     await self._reply(msg, Reply(text=(
                         f"✅ *Project deleted*\n\n"
                         f"• Sessions removed: {summary['sessions_deleted']}\n"
-                        f"• ChromaDB collections cleared\n\n"
+                        f"• Vector data cleared\n\n"
                         f"Use /register\\_project to start fresh."
                     ), edit_message=True))
                 except Exception as e:

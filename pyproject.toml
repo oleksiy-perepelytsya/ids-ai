@@ -16,7 +16,8 @@ python-telegram-bot = "^21.0"
 # Storage
 motor = "^3.3.2"
 pymongo = "^4.6.0"
-chromadb = "^0.5.0"
+qdrant-client = "^1.9.0"
+sentence-transformers = {version = "^3.0.0", optional = true}
 redis = "^5.0.0"
 # Data validation
 pydantic = "^2.5.0"
@@ -28,8 +29,10 @@ pyyaml = "^6.0.1"
 # Async
 aiohttp = "^3.9.0"
 pypdf = "^4.0.0"
-# NumPy version constraint for compatibility
-numpy = "^1.24.0,<2.0.0"
+numpy = "^1.24.0"
+
+[tool.poetry.extras]
+local-embeddings = ["sentence-transformers"]
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

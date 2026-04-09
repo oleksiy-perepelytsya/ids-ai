@@ -34,8 +34,8 @@ class Settings(BaseSettings):
     # Storage Configuration
     mongodb_uri: str = Field(default="mongodb://localhost:27017")
     mongodb_db: str = Field(default="ids")
-    chromadb_host: str = Field(default="localhost")
-    chromadb_port: int = Field(default=8000)
+    qdrant_host: str = Field(default="localhost")
+    qdrant_port: int = Field(default=6333)
     redis_url: str = Field(default="redis://localhost:6379")
 
     # Behavior Configuration
@@ -78,9 +78,9 @@ class Settings(BaseSettings):
         return [int(uid.strip()) for uid in raw.split(",") if uid.strip()]
 
     @property
-    def chromadb_url(self) -> str:
-        """ChromaDB HTTP URL"""
-        return f"http://{self.chromadb_host}:{self.chromadb_port}"
+    def qdrant_url(self) -> str:
+        """Qdrant HTTP URL"""
+        return f"http://{self.qdrant_host}:{self.qdrant_port}"
 
 
 # Global settings instance

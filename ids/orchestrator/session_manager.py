@@ -10,9 +10,10 @@ from ids.models import (
     ROLE_SOURCER,
     SourcerLog,
 )
-from ids.storage import MongoSessionStore, MongoProjectStore, ChromaStore
+from ids.storage import MongoSessionStore, MongoProjectStore
 from ids.orchestrator.round_executor import RoundExecutor
 from ids.orchestrator.consensus_builder import ConsensusBuilder
+from ids.search import SearchOrchestrator
 from ids.config import settings
 from ids.utils import get_logger
 
@@ -31,13 +32,13 @@ class SessionManager:
         consensus_builder: ConsensusBuilder,
         session_store: MongoSessionStore,
         project_store: MongoProjectStore,
-        chroma_store: Optional[ChromaStore] = None
+        search: Optional[SearchOrchestrator] = None,
     ):
         self.llm_client = llm_client
         self.consensus_builder = consensus_builder
         self.session_store = session_store
         self.project_store = project_store
-        self.chroma_store = chroma_store
+        self.search = search
         # Agent cache: project_id -> dict of agents
         self._agent_cache: dict[str, dict] = {}
         logger.info("session_manager_initialized")
@@ -62,8 +63,8 @@ class SessionManager:
         """Get a RoundExecutor for the given project (uses cached agents)."""
         agents = await self._get_agents(project_id)
         project = await self.project_store.get_project(project_id)
-        embedding_model = project.embedding_model if project else "default"
-        return RoundExecutor(agents, self.consensus_builder, self.chroma_store, embedding_model=embedding_model)
+        embedding_model = project.embedding_model if project else "minilm"
+        return RoundExecutor(agents, self.consensus_builder, self.search, embedding_model=embedding_model)
 
     def invalidate_agent_cache(self, project_id: str) -> None:
         """Remove cached agents for a project (call after prompt URL changes)."""
@@ -241,8 +242,8 @@ class SessionManager:
         sessions_deleted = await self.session_store.delete_project_sessions(project_id)
         project_deleted = await self.project_store.delete_project(project_id)
 
-        if self.chroma_store:
-            await self.chroma_store.delete_project_data(project_id)
+        if self.search:
+            await self.search.delete_project_data(project_id)
 
         logger.info(
             "project_fully_deleted",
@@ -251,10 +252,10 @@ class SessionManager:
         )
         return {"sessions_deleted": sessions_deleted, "project_deleted": project_deleted}
 
-    async def learn_from_text(self, project_id: str, text: str, embedding_model: str = "default") -> None:
-        """Directly store text as learning data in ChromaDB"""
-        if self.chroma_store:
-            await self.chroma_store.add_learning_pattern(
+    async def learn_from_text(self, project_id: str, text: str, embedding_model: str = "minilm") -> None:
+        """Directly store text as learning data."""
+        if self.search:
+            await self.search.add_learning_pattern(
                 project_id=project_id,
                 content=text,
                 metadata={"type": "direct_learning", "timestamp": datetime.utcnow().isoformat()},
@@ -263,10 +264,10 @@ class SessionManager:
             logger.info("direct_learning_added", project_id=project_id)
 
     async def embed_file_chunks(
-        self, project_id: str, filename: str, chunks: list[str], embedding_model: str = "default"
+        self, project_id: str, filename: str, chunks: list[str], embedding_model: str = "minilm"
     ) -> int:
-        """Store file text chunks as learning patterns in ChromaDB. Returns number of chunks stored."""
-        if not self.chroma_store:
+        """Store file text chunks as learning patterns. Returns number of chunks stored."""
+        if not self.search:
             return 0
 
         stored = 0
@@ -279,7 +280,7 @@ class SessionManager:
                 "total_chunks": total,
                 "timestamp": datetime.utcnow().isoformat(),
             }
-            await self.chroma_store.add_learning_pattern(
+            await self.search.add_learning_pattern(
                 project_id=project_id,
                 content=chunk,
                 metadata=metadata,
@@ -295,12 +296,12 @@ class SessionManager:
         project_id: str,
         task: str,
         model: str,
-        embedding_model: str = "default",
+        embedding_model: str = "minilm",
         genprompt_model: Optional[str] = None,
         user_id: int = 0,
     ) -> tuple[str, Optional[str]]:
         """
-        Run single-agent 'Sourcer' mode with RAG from ChromaDB + MongoDB session history.
+        Run single-agent 'Sourcer' mode with RAG from vector store + MongoDB session history.
 
         If genprompt_model is set, first calls that model to generate an optimised
         search prompt, then uses the generated prompt for the actual sourcer call.
@@ -333,8 +334,8 @@ class SessionManager:
 
         # Step 2: RAG retrieval using (generated or original) query
         learning_patterns = []
-        if self.chroma_store:
-            learning_patterns = await self.chroma_store.search_learning_patterns(
+        if self.search:
+            learning_patterns = await self.search.search_learning_patterns(
                 project_id=project_id,
                 query=search_query,
                 embedding_model=embedding_model,

@@ -1,17 +1,14 @@
 #!/usr/bin/env python3
 """
-import_embeddings.py — Bulk import pre-computed embeddings into ChromaDB.
+import_embeddings.py — Bulk import pre-computed embeddings into Qdrant.
 
 Imports text + pre-computed vectors from a JSONL or JSON file into a
-ChromaDB collection (learning_{project_id}) using OpenAI's
-text-embedding-ada-002 embedding function.
-
-Because the vectors are pre-computed, no OpenAI API calls are made during
-import. The OpenAI EF is only attached to the collection so that /sourcer
-queries can embed the search query with the same model at query time.
+Qdrant collection (corpus_{dataset_id} or learning_{project_id}).
+Stores a CorpusManifest in MongoDB and optionally writes full documents
+to corpus_docs for later hydration.
 
 Supported input formats:
-  JSONL  (.jsonl / .ndjson)  — one JSON object per line  ← recommended for large files
+  JSONL  (.jsonl / .ndjson)  — one JSON object per line  ← recommended
   JSON   (.json)             — JSON array, streamed via ijson
 
 Required per-record fields (names configurable via CLI flags):
@@ -24,21 +21,20 @@ Optional per-record fields:
 
 Usage examples:
   python scripts/import_embeddings.py data.jsonl \\
-      --project-id proj_abc123 \\
-      --openai-key sk-...
+      --dataset-id arxiv_cs_2020 \\
+      --embedding-model bge-large
 
-  python scripts/import_embeddings.py data.json \\
-      --project-id proj_abc123 \\
-      --openai-key sk-... \\
-      --text-field content \\
-      --embedding-field vector \\
+  python scripts/import_embeddings.py data.jsonl \\
+      --project-id proj_abc123
+
+  python scripts/import_embeddings.py data.jsonl \\
+      --dataset-id pubmed_2024 \\
+      --embedding-model ada \\
+      --text-field abstract \\
       --batch-size 500
 
-  # Dry-run to validate file structure without writing anything
   python scripts/import_embeddings.py data.jsonl \\
-      --project-id proj_abc123 \\
-      --openai-key sk-... \\
-      --dry-run
+      --dataset-id test --dry-run
 """
 
 import argparse
@@ -49,18 +45,17 @@ import uuid
 from pathlib import Path
 from typing import Iterator
 
+from qdrant_client import QdrantClient, models
+
 # ── defaults ──────────────────────────────────────────────────────────────────
 DEFAULT_HOST = "localhost"
-DEFAULT_PORT = 8000
+DEFAULT_PORT = 6333
 DEFAULT_BATCH = 200
-OPENAI_MODEL = "text-embedding-ada-002"
-EXPECTED_DIM = 1536
 
 
 # ── file readers ──────────────────────────────────────────────────────────────
 
 def iter_jsonl(path: Path) -> Iterator[dict]:
-    """Stream records from a JSONL / NDJSON file."""
     with open(path, "r", encoding="utf-8") as fh:
         for lineno, line in enumerate(fh, 1):
             line = line.strip()
@@ -73,27 +68,20 @@ def iter_jsonl(path: Path) -> Iterator[dict]:
 
 
 def iter_json_array(path: Path) -> Iterator[dict]:
-    """Stream records from a large JSON array using ijson."""
     try:
         import ijson
     except ImportError:
         print(
             "❌  JSON array files require the ijson package:\n"
-            "       pip install ijson\n\n"
-            "   Or convert to JSONL first (much faster for 14 GB):\n"
-            "       python -c \""
-            "import json,sys; [print(json.dumps(r)) "
-            "for r in json.load(open(sys.argv[1]))\" data.json > data.jsonl",
+            "       pip install ijson",
             file=sys.stderr,
         )
         sys.exit(1)
-
     with open(path, "rb") as fh:
         yield from ijson.items(fh, "item")
 
 
 def _is_json_array(path: Path) -> bool:
-    """Peek at first non-whitespace byte to distinguish array ([) from JSONL ({)."""
     with open(path, "rb") as fh:
         while True:
             byte = fh.read(1)
@@ -111,23 +99,13 @@ def iter_records(path: Path) -> Iterator[dict]:
         if _is_json_array(path):
             yield from iter_json_array(path)
         else:
-            # .json file containing JSONL (one object per line)
-            print("ℹ   Detected JSONL format inside .json file — streaming line by line.")
+            print("ℹ   Detected JSONL format inside .json file.")
             yield from iter_jsonl(path)
     else:
-        # Unknown extension — try JSONL first (works for most export formats)
         yield from iter_jsonl(path)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
-
-def _safe_meta(meta: dict) -> dict:
-    """ChromaDB metadata values must be str / int / float / bool."""
-    return {
-        k: v for k, v in meta.items()
-        if isinstance(v, (str, int, float, bool))
-    }
-
 
 def _progress(inserted: int, skipped: int, t0: float) -> None:
     elapsed = time.time() - t0
@@ -144,7 +122,7 @@ def _progress(inserted: int, skipped: int, t0: float) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Bulk import pre-computed ada-002 embeddings into ChromaDB",
+        description="Bulk import pre-computed embeddings into Qdrant",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
@@ -154,220 +132,221 @@ def main() -> None:
     # Target
     tgt = parser.add_mutually_exclusive_group(required=True)
     tgt.add_argument(
+        "--dataset-id",
+        help="Corpus dataset ID — imports into corpus_{dataset_id}",
+    )
+    tgt.add_argument(
         "--project-id",
         help="IDS project ID — imports into learning_{project_id}",
     )
     tgt.add_argument(
         "--collection",
-        help="Raw ChromaDB collection name",
+        help="Raw Qdrant collection name",
+    )
+
+    # Embedding model
+    parser.add_argument(
+        "--embedding-model", default="ada",
+        help="Embedding registry key (default: ada)",
     )
 
     # Connection
-    parser.add_argument("--host", default=DEFAULT_HOST, help=f"ChromaDB host (default: {DEFAULT_HOST})")
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"ChromaDB port (default: {DEFAULT_PORT})")
+    parser.add_argument("--host", default=DEFAULT_HOST)
+    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
 
-    # Auth
-    parser.add_argument(
-        "--openai-key",
-        default=None,
-        help="OpenAI API key (can also be set via OPENAI_API_KEY env var)",
-    )
+    # MongoDB (for manifest + corpus_docs)
+    parser.add_argument("--mongo-uri", default="mongodb://localhost:27017")
+    parser.add_argument("--mongo-db", default="ids")
 
     # Field mapping
-    parser.add_argument("--text-field",      default="text",      help="Field containing document text (default: text)")
-    parser.add_argument("--embedding-field", default="embedding", help="Field containing vector (default: embedding)")
-    parser.add_argument("--id-field",        default="id",        help="Field for record ID (default: id)")
-    parser.add_argument("--metadata-field",  default="metadata",  help="Field for metadata dict (default: metadata)")
+    parser.add_argument("--text-field", default="text")
+    parser.add_argument("--embedding-field", default="embedding")
+    parser.add_argument("--id-field", default="id")
+    parser.add_argument("--metadata-field", default="metadata")
 
     # Behaviour
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH, help=f"Records per upsert batch (default: {DEFAULT_BATCH})")
-    parser.add_argument("--skip-errors", action="store_true", help="Skip bad records instead of aborting")
-    parser.add_argument("--drop-existing", action="store_true", help="Delete the collection before importing")
-    parser.add_argument("--dry-run", action="store_true", help="Parse + validate without writing to ChromaDB")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH)
+    parser.add_argument("--skip-errors", action="store_true")
+    parser.add_argument("--drop-existing", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--on-disk", action="store_true", help="Use on-disk HNSW (for large corpora)")
 
     args = parser.parse_args()
 
-    # ── validate file ──────────────────────────────────────────────────────────
     if not args.file.exists():
         print(f"❌  File not found: {args.file}", file=sys.stderr)
         sys.exit(1)
 
     file_gb = args.file.stat().st_size / 1024 ** 3
-    collection_name = f"learning_{args.project_id}" if args.project_id else args.collection
 
-    # ── resolve OpenAI key ─────────────────────────────────────────────────────
-    import os
-    openai_key = args.openai_key or os.getenv("OPENAI_API_KEY")
-    if not openai_key and not args.dry_run:
-        print(
-            "❌  OpenAI API key is required.\n"
-            "   Pass --openai-key sk-... or set OPENAI_API_KEY in the environment.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
+    # Determine collection name
+    if args.dataset_id:
+        collection_name = f"corpus_{args.dataset_id}"
+    elif args.project_id:
+        collection_name = f"learning_{args.project_id}"
+    else:
+        collection_name = args.collection
 
-    # ── connect to ChromaDB ────────────────────────────────────────────────────
+    emb_model = args.embedding_model
+
     print(f"📂  Input:      {args.file}  ({file_gb:.2f} GB)")
     print(f"🗄   Collection: {collection_name}")
-    print(f"🌐  ChromaDB:   {args.host}:{args.port}")
+    print(f"🌐  Qdrant:     {args.host}:{args.port}")
     print(f"📦  Batch size: {args.batch_size}")
+    print(f"🧠  Embedding:  {emb_model}")
     if args.dry_run:
         print("🔍  DRY RUN — nothing will be written")
     print()
 
+    client = None
     if not args.dry_run:
-        import chromadb
-        from chromadb.utils.embedding_functions import OpenAIEmbeddingFunction
-
         try:
-            client = chromadb.HttpClient(host=args.host, port=args.port)
-            client.heartbeat()
+            client = QdrantClient(host=args.host, port=args.port)
         except Exception as exc:
-            print(f"❌  Cannot connect to ChromaDB at {args.host}:{args.port}: {exc}", file=sys.stderr)
+            print(f"❌  Cannot connect to Qdrant: {exc}", file=sys.stderr)
             sys.exit(1)
 
-        ef = OpenAIEmbeddingFunction(api_key=openai_key, model_name=OPENAI_MODEL)
-
-        if args.drop_existing:
-            try:
-                client.delete_collection(collection_name)
-                print(f"🗑   Deleted existing collection: {collection_name}")
-            except Exception:
-                pass  # didn't exist yet
-
-        collection = client.get_or_create_collection(
-            name=collection_name,
-            embedding_function=ef,
-            metadata={"hnsw:space": "cosine"},
-        )
-
-        existing = collection.count()
-        if existing > 0:
-            print(f"ℹ   Collection already has {existing:,} records — new records will be upserted.")
-        print()
-
-    # ── streaming import ───────────────────────────────────────────────────────
-    b_ids:   list[str]        = []
-    b_docs:  list[str]        = []
-    b_vecs:  list[list[float]] = []
-    b_metas: list[dict]       = []
-
+    # ── streaming import ───────────────────────────────────────────────────
+    points: list[models.PointStruct] = []
     inserted = 0
-    skipped  = 0
-    batch_n  = 0
+    skipped = 0
     first_dim: int | None = None
     t0 = time.time()
 
     def flush() -> None:
-        nonlocal inserted, skipped, batch_n
-        if not b_ids:
+        nonlocal inserted
+        if not points or args.dry_run:
+            if points:
+                inserted += len(points)
+                _progress(inserted, skipped, t0)
+                points.clear()
             return
-        # Deduplicate within batch — keep last occurrence (source file may have dupes)
-        seen: dict[str, int] = {}
-        for i, rec_id in enumerate(b_ids):
-            seen[rec_id] = i
-        if len(seen) < len(b_ids):
-            dupes = len(b_ids) - len(seen)
-            skipped += dupes
-            idxs = sorted(seen.values())
-            u_ids   = [b_ids[i]   for i in idxs]
-            u_docs  = [b_docs[i]  for i in idxs]
-            u_vecs  = [b_vecs[i]  for i in idxs]
-            u_metas = [b_metas[i] for i in idxs]
-        else:
-            u_ids, u_docs, u_vecs, u_metas = b_ids, b_docs, b_vecs, b_metas
-        if not args.dry_run:
-            collection.upsert(
-                ids=u_ids,
-                documents=u_docs,
-                embeddings=u_vecs,
-                metadatas=u_metas,
-            )
-        inserted += len(u_ids)
-        batch_n  += 1
+        client.upsert(collection_name=collection_name, points=points)
+        inserted += len(points)
         _progress(inserted, skipped, t0)
-        b_ids.clear(); b_docs.clear(); b_vecs.clear(); b_metas.clear()
+        points.clear()
 
     try:
         for record in iter_records(args.file):
-
-            # ── embedding ──────────────────────────────────────────────────────
             vec = record.get(args.embedding_field)
             if not vec or not isinstance(vec, list):
                 skipped += 1
                 if not args.skip_errors:
-                    print(
-                        f"\n❌  Record missing '{args.embedding_field}' field.\n"
-                        "   Use --skip-errors to skip bad records.",
-                        file=sys.stderr,
-                    )
+                    print(f"\n❌  Missing '{args.embedding_field}' field.", file=sys.stderr)
                     sys.exit(1)
                 continue
 
-            # Dimension check (first record sets the reference)
             if first_dim is None:
                 first_dim = len(vec)
                 print(f"📐  Embedding dimension: {first_dim}")
-                if first_dim != EXPECTED_DIM:
-                    print(
-                        f"⚠   Expected {EXPECTED_DIM} dims for ada-002 but got {first_dim}. "
-                        "Continuing anyway.",
-                        file=sys.stderr,
-                    )
+                # Create collection if needed
+                if client and not args.dry_run:
+                    if args.drop_existing:
+                        try:
+                            client.delete_collection(collection_name)
+                            print(f"🗑   Deleted existing: {collection_name}")
+                        except Exception:
+                            pass
+                    try:
+                        client.get_collection(collection_name)
+                        print(f"ℹ   Collection exists — upserting.")
+                    except Exception:
+                        client.create_collection(
+                            collection_name=collection_name,
+                            vectors_config={
+                                emb_model: models.VectorParams(
+                                    size=first_dim,
+                                    distance=models.Distance.COSINE,
+                                    on_disk=args.on_disk,
+                                ),
+                            },
+                        )
+                        print(f"✅  Created collection: {collection_name}")
+
             elif len(vec) != first_dim:
                 skipped += 1
                 if not args.skip_errors:
-                    print(
-                        f"\n❌  Dimension mismatch: expected {first_dim}, got {len(vec)}.\n"
-                        "   Use --skip-errors to skip.",
-                        file=sys.stderr,
-                    )
+                    print(f"\n❌  Dim mismatch: {first_dim} vs {len(vec)}", file=sys.stderr)
                     sys.exit(1)
                 continue
 
-            # ── text ───────────────────────────────────────────────────────────
             text = record.get(args.text_field, "")
             if not isinstance(text, str):
                 text = str(text)
 
-            # ── id ─────────────────────────────────────────────────────────────
             rec_id = record.get(args.id_field)
             rec_id = str(rec_id) if rec_id else str(uuid.uuid4())
+            # Ensure valid UUID for Qdrant
+            try:
+                uuid.UUID(rec_id)
+            except ValueError:
+                rec_id = str(uuid.uuid5(uuid.NAMESPACE_URL, rec_id))
 
-            # ── metadata ───────────────────────────────────────────────────────
             meta = record.get(args.metadata_field) or {}
-            meta = _safe_meta(meta) if isinstance(meta, dict) else {}
-            meta["embedding_model"] = OPENAI_MODEL
+            if not isinstance(meta, dict):
+                meta = {}
+            meta["text"] = text
+            meta["embedding_model"] = emb_model
 
-            b_ids.append(rec_id)
-            b_docs.append(text)
-            b_vecs.append(vec)
-            b_metas.append(meta)
+            points.append(models.PointStruct(
+                id=rec_id,
+                vector={emb_model: vec},
+                payload=meta,
+            ))
 
-            if len(b_ids) >= args.batch_size:
+            if len(points) >= args.batch_size:
                 flush()
 
     except KeyboardInterrupt:
-        print("\n\n⚠   Interrupted — flushing current batch …")
+        print("\n\n⚠   Interrupted — flushing …")
         flush()
-        print(f"Partial import: {inserted:,} inserted, {skipped:,} skipped.")
+        print(f"Partial: {inserted:,} inserted, {skipped:,} skipped.")
         sys.exit(130)
 
-    flush()  # final batch
+    flush()
 
-    # ── summary ────────────────────────────────────────────────────────────────
     elapsed = time.time() - t0
     print(f"\n\n✅  Done in {elapsed:.1f}s")
     print(f"   Inserted: {inserted:,}")
     if skipped:
         print(f"   Skipped:  {skipped:,}")
+
+    # ── write corpus manifest to MongoDB ──────────────────────────────────
+    if args.dataset_id and not args.dry_run:
+        try:
+            from pymongo import MongoClient
+            mongo = MongoClient(args.mongo_uri)
+            db = mongo[args.mongo_db]
+            db["corpus_manifests"].replace_one(
+                {"dataset_id": args.dataset_id},
+                {
+                    "dataset_id": args.dataset_id,
+                    "embedding_model": emb_model,
+                    "vector_dim": first_dim or 0,
+                    "doc_count": inserted,
+                    "chunk_count": inserted,
+                    "schema_version": 1,
+                    "source_file": str(args.file),
+                    "field_map": {
+                        "text": args.text_field,
+                        "id": args.id_field,
+                        "embedding": args.embedding_field,
+                    },
+                },
+                upsert=True,
+            )
+            print(f"\n📋  Manifest written to MongoDB: corpus_manifests/{args.dataset_id}")
+        except Exception as e:
+            print(f"\n⚠   Failed to write manifest: {e}", file=sys.stderr)
+
     if not args.dry_run:
-        print(f"   Collection total: {collection.count():,}")
         print()
         print("Next steps:")
-        print(f"  1. In Telegram: /project <name>")
-        print(f"  2. Set embedding model: /set_model embedding ada-002")
-        print(f"  3. Query: /sourcer claude <your question>")
+        if args.dataset_id:
+            print(f"  1. Bind corpus to project: add DataSource with namespace='corpus_{args.dataset_id}'")
+        else:
+            print(f"  1. In Telegram: /project <name>")
+        print(f"  2. Query: /sourcer claude <your question>")
 
 
 if __name__ == "__main__":

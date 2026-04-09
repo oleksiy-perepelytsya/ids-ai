@@ -8,7 +8,7 @@ services:
       - ${PROJECTS_ROOT:-./projects}:/projects
     depends_on:
       - mongodb
-      - chromadb
+      - qdrant
       - redis
     restart: unless-stopped
     command: sh -c "sleep 10 && python -m ids"
@@ -35,15 +35,14 @@ services:
         max-size: "5m"
         max-file: "2"
 
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: ids-chromadb
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ids-qdrant
     # No port exposed — only accessible within Docker network
     volumes:
-      - chroma_data:/chroma/chroma
+      - qdrant_data:/qdrant/storage
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
+      - QDRANT__STORAGE__ON_DISK_PAYLOAD=true
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -68,5 +67,5 @@ services:
 
 volumes:
   mongodb_data:
-  chroma_data:
+  qdrant_data:
   redis_data:
