@@ -26,7 +26,7 @@ class BaseSessionStore(ABC):
     @abstractmethod
     async def get_user_sessions(
         self,
-        telegram_user_id: int,
+        user_id: int,
         project_id: str,
         limit: int = 10
     ) -> List[DevSession]:
@@ -34,7 +34,7 @@ class BaseSessionStore(ABC):
         pass
 
     @abstractmethod
-    async def get_active_session(self, telegram_user_id: int, project_id: str) -> Optional[DevSession]:
+    async def get_active_session(self, user_id: int, project_id: str) -> Optional[DevSession]:
         """Get user's currently active session for a project"""
         pass
 
@@ -61,13 +61,13 @@ class BaseProjectStore(ABC):
     async def get_project_by_name(
         self,
         name: str,
-        telegram_user_id: int
+        user_id: int
     ) -> Optional[Project]:
         """Get project by name for specific user"""
         pass
 
     @abstractmethod
-    async def get_user_projects(self, telegram_user_id: int) -> List[Project]:
+    async def get_user_projects(self, user_id: int) -> List[Project]:
         """Get all projects for user"""
         pass
 

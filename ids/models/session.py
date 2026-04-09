@@ -13,7 +13,7 @@ class SourcerLog(BaseModel):
     """Record of a single /sourcer invocation"""
     log_id: str = Field(description="Unique log identifier")
     project_id: str
-    telegram_user_id: int
+    user_id: int = Field(description="User who invoked the sourcer")
     original_query: str = Field(description="Raw query from the user")
     generated_prompt: Optional[str] = Field(default=None, description="Prompt produced by genprompt model")
     genprompt_model: Optional[str] = Field(default=None, description="Model used for prompt generation")
@@ -80,8 +80,8 @@ class RoundResult(BaseModel):
 class DevSession(BaseModel):
     """Development/deliberation session"""
     session_id: str = Field(description="Unique session identifier")
-    telegram_user_id: int = Field(description="Telegram user who created session")
-    telegram_chat_id: int = Field(description="Telegram chat ID")
+    user_id: int = Field(description="User who created session")
+    chat_id: int = Field(description="Chat/channel ID for responses")
     project_id: str = Field(description="Project ID this session belongs to")
     project_name: Optional[str] = Field(default=None, description="Project name (display only)")
 

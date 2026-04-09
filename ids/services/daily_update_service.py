@@ -36,7 +36,7 @@ class DailyUpdateService:
         1. Build system + user prompts (from planetary_fingerprint_agent_prompt.py or fallback)
         2. Call LLM with date as input
         3. Parse JSON response (agent returns chromadb_ready section + raw data)
-        4. Store in MongoDB + ChromaDB
+        4. Store in MongoDB + Qdrant
         5. Return stored document
 
         Args:

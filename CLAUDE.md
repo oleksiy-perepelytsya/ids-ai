@@ -4,91 +4,102 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-IDS (Intelligent Development System) is a multi-agent AI deliberation platform accessed via Telegram. It implements a "Parliament" architecture where 6 specialist agents (Gemini 2.0 Flash) + 1 generalist agent (Claude Sonnet 4) debate questions and reach consensus using CROSS scoring (Confidence, Risk, Outcome, Standard deviation).
+IDS (Intelligent Development System) is a multi-agent AI deliberation platform. It implements a "Parliament" architecture where specialist agents (Gemini) + generalist agent (Claude) debate questions and reach consensus using CROSS scoring (Confidence, Risk, Outcome, Standard deviation).
 
 **Budget target:** $10/month. Gemini handles ~90% of operations; Claude handles ~10% critical decisions.
 
-**Status:** Phase 1 complete (deliberation), Phase 2 active (Claude Code integration for implementation).
+## Roadmap
+
+- **Phase 1** — Deliberation engine ✅ (parliament, CROSS scoring, consensus, knowledge base)
+- **Phase 2** — Interfaces, prompts, projects, role models 🔧 (active)
+  - ✅ Abstract interface layer (`InterfaceAdapter` protocol, `CommandHandler`)
+  - ✅ Telegram adapter
+  - ✅ CLI REPL adapter
+  - ✅ Project model with per-project prompt configs and specialist roles
+  - ✅ Prompt loader (URL + local fallback)
+  - ✅ Hostess agent (app assistant)
+  - ⬜ Web interface
+  - ⬜ Email interface
+  - ⬜ Generic prompt library
+  - ⬜ Role models management
+- **Phase 3** — MCP server & data sources ⬜
+  - MCP server with management system
+  - Connect databases and external data sources (app-wide or per-project)
+  - Include data sources in agent workflows
+- **Phase 4** — Claude Code / CLI integration ⬜ (lowest priority, not implemented)
+  - Post-consensus implementation via `claude -p`
+  - Direct `/code` command
+  - Note: exploratory code exists (`claude_code.py`, `code_workflow.py`) — should be removed
 
 ## Commands
 
 ```bash
-# Run locally
-poetry install
-python -m ids
-
-# Run with Docker (dev - builds locally, mounts code for live reload)
-docker compose -f docker-compose.dev.yml up
-
-# Run with Docker (prod - pulls from GHCR)
-docker compose up
-
-# Lint
-poetry run ruff check ids/
-poetry run ruff format ids/
-
-# Type check
-poetry run mypy ids/
-
-# Tests (test directory exists but tests are not yet implemented)
-poetry run pytest
+poetry install && python -m ids              # Telegram (default)
+python -m ids --interface cli                 # CLI REPL
+docker compose -f docker-compose.dev.yml up   # Docker dev
+docker compose up                             # Docker prod
+poetry run ruff check ids/ && poetry run ruff format ids/  # Lint
+poetry run mypy ids/                          # Type check
+poetry run pytest                             # Tests (not yet implemented)
 ```
 
 ## Architecture
 
-### Deliberation Flow
 ```
-User (Telegram) → Bot Handlers → SessionManager → RoundExecutor
-                                                        ↓
-                                             ConsensusBuilder ← Agents (via LLMClient)
-                                                        ↓
-                                      MongoDB (sessions) + ChromaDB (learned patterns)
-```
-
-1. User submits a question via Telegram
-2. `SessionManager` creates a session with project context
-3. `RoundExecutor` runs up to `MAX_ROUNDS` (default 3) deliberation rounds:
-   - Generalist (Claude) frames the problem without proposing solutions
-   - Specialists (Gemini) respond with CROSS scores + analysis
-   - `ConsensusBuilder` evaluates scores against thresholds in `ids/config/thresholds.yaml`
-4. Result: consensus reached, dead-end detected, or user feedback requested
-5. Successful patterns stored in ChromaDB for future retrieval
-
-### Claude Code Integration (Phase 2)
-
-After consensus, users can press "Implement" to invoke Claude Code CLI (`claude -p`) against the target project. The `/code` command also supports direct implementation without deliberation.
-
-```
-Consensus Decision → CodeWorkflow._build_consensus_prompt() → ClaudeCodeExecutor
-                                                                      ↓
-                                                              claude -p --output-format json
-                                                                      ↓
-                                                              ClaudeCodeResult → Telegram
+User ──→ InterfaceAdapter ──→ CommandHandler ──→ SessionManager → RoundExecutor
+         (Telegram/CLI/…)    (business logic)                          ↓
+                                                          ConsensusBuilder ← Agents (via LLMClient)
+                                                                           ↓
+                                                         MongoDB (sessions) + Qdrant (vector search)
 ```
 
-- **`ids/services/claude_code.py`** — Async subprocess wrapper around `claude -p` CLI.
-- **`ids/orchestrator/code_workflow.py`** — Orchestrates implementation: `implement_from_consensus()` (post-deliberation) and `implement_direct()` (via `/code` command).
+### Search Architecture
+
+```
+Callers (RoundExecutor, SessionManager, HostessContext)
+                         │
+               SearchOrchestrator   ← single entry point
+                         │
+           reads project.data_sources[]
+           fans out to backends, merges hits
+                         │
+              ┌──────────┼──────────┐
+              ▼          ▼          ▼
+        QdrantBackend  GraphBackend  (future)
+              │        (Phase 3 stub)
+           Qdrant
+```
+
+- **`ids/search/backend.py`** — `SearchBackend` protocol, `SearchHit`, `VectorDoc`
+- **`ids/search/orchestrator.py`** — `SearchOrchestrator` (replaces ChromaStore)
+- **`ids/search/embeddings.py`** — `EMBEDDING_REGISTRY` + `EmbeddingSpec`
+- **`ids/search/data_source.py`** — `DataSource` model (per-project search config)
+- **`ids/search/manifests.py`** — `CorpusManifest` (dataset metadata in MongoDB)
+- **`ids/search/backends/qdrant.py`** — `QdrantBackend` (named vectors, nested payloads)
+- **`ids/search/backends/graph.py`** — `GraphBackend` stub (Phase 3)
 
 ### Key Components
 
-- **`ids/agents/base_agent.py`** — Single unified `Agent` class for all agents. Behavior differentiated by persona markdown files in `ids/agents/personas/`.
-- **`ids/services/llm_client.py`** — Unified client wrapping both Gemini and Anthropic APIs. Routes requests based on agent role.
-- **`ids/orchestrator/session_manager.py`** — Session lifecycle orchestration.
-- **`ids/orchestrator/round_executor.py`** — Executes individual deliberation rounds, manages agent execution (parallel or sequential based on `PARALLEL_AGENTS` env var).
-- **`ids/orchestrator/consensus_builder.py`** — Evaluates CROSS scores against configurable thresholds.
-- **`ids/config/settings.py`** — Pydantic Settings loading all configuration from `.env`.
-- **`ids/storage/mongo_store.py`** — MongoDB persistence for sessions and projects.
-- **`ids/storage/chroma_store.py`** — ChromaDB vector store for knowledge base / learned patterns.
-- **`ids/interfaces/telegram/`** — Bot handlers, keyboard builders, message formatters.
+- **`ids/interfaces/base.py`** — Abstract `InterfaceAdapter` protocol + `Message`/`Reply` value objects
+- **`ids/interfaces/command_handler.py`** — Transport-agnostic command handler (all business logic)
+- **`ids/interfaces/telegram/adapter.py`** — Telegram adapter
+- **`ids/interfaces/cli/adapter.py`** — CLI REPL adapter
+- **`ids/agents/base_agent.py`** — Unified `Agent` class; behavior driven by persona markdown files in `ids/agents/personas/`
+- **`ids/services/llm_client.py`** — Unified client for Gemini and Anthropic APIs
+- **`ids/services/prompt_loader.py`** — Fetches prompts from URL or local fallback
+- **`ids/orchestrator/`** — `SessionManager`, `RoundExecutor`, `ConsensusBuilder`
+- **`ids/config/settings.py`** — Pydantic Settings (`.env`)
+- **`ids/config/thresholds.yaml`** — Consensus scoring thresholds
+- **`ids/storage/mongo_store.py`** — MongoDB (sessions, projects, corpus_manifests, corpus_docs)
+- **`ids/models/project.py`** — Project model with per-project prompts, specialist roles, data sources
 
 ### Agent Roles
 
-Agents are defined by persona files in `ids/agents/personas/` (markdown with `# Role:` and `# System Prompt` sections):
+Defined by persona files in `ids/agents/personas/` (markdown with `# Role:` and `# System Prompt`):
 - **Generalist** (Claude) — Facilitator, frames problems, does NOT propose solutions
-- **Developer Progressive/Critic** (Gemini) — Implementation proposals / code quality challenges
-- **Architect Progressive/Critic** (Gemini) — Architectural patterns / scalability trade-offs
-- **SRE Progressive/Critic** (Gemini) — Operational concerns / deployment risks
+- **Specialists** (Gemini) — Progressive/Critic pairs for Dev, Architect, SRE
 - **Sourcer** (Gemini) — Knowledge base search
+- **Hostess** (Gemini) — App assistant, helps users navigate IDS
 
 ## Code Conventions
 
@@ -96,11 +107,11 @@ Agents are defined by persona files in `ids/agents/personas/` (markdown with `# 
 - **Pydantic models** for all data structures (`ids/models/`)
 - **Structured logging** via `structlog` with JSON output
 - **Type hints** on all function signatures
-- **Configuration** via environment variables through Pydantic Settings (see `.env.example`)
+- **Configuration** via environment variables through Pydantic Settings
 - **Ruff** for linting (line-length: 100, Python 3.11 target)
-- **No mocks in tests** — error-driven development philosophy; use real services
-- **Agent personas** are markdown files, not code — edit `ids/agents/personas/*.md` to change agent behavior
+- **No mocks in tests** — use real services
+- **Agent personas** are markdown files, not code
 
 ## Infrastructure
 
-Services run via Docker Compose: MongoDB 7 (sessions/projects), ChromaDB (vector knowledge base), Redis 7 (optional caching). The app container waits 10 seconds for services to initialize before starting.
+Docker Compose: MongoDB 7, Qdrant (vector search), Redis 7 (optional caching).

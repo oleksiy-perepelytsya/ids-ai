@@ -19,7 +19,7 @@ services:
       - ${PROJECTS_ROOT:-./projects}:/projects
     depends_on:
       - mongodb
-      - chromadb
+      - qdrant
       - redis
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -43,16 +43,15 @@ services:
     command: mongod --bind_ip_all --wiredTigerCacheSizeGB 0.5
     restart: unless-stopped
 
-  chromadb:
-    image: chromadb/chroma:latest
-    container_name: ids-chromadb-dev
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: ids-qdrant-dev
     ports:
-      - "8000:8000"
+      - "6333:6333"
     volumes:
-      - chroma_data_dev:/chroma/chroma
+      - qdrant_data_dev:/qdrant/storage
     environment:
-      - IS_PERSISTENT=TRUE
-      - ANONYMIZED_TELEMETRY=FALSE
+      - QDRANT__STORAGE__ON_DISK_PAYLOAD=true
     restart: unless-stopped
 
   redis:
@@ -67,5 +66,5 @@ services:
 
 volumes:
   mongodb_data_dev:
-  chroma_data_dev:
+  qdrant_data_dev:
   redis_data_dev:

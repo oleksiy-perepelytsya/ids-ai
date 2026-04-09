@@ -27,7 +27,7 @@ class MongoSessionStore(BaseSessionStore):
         logger.info(
             "session_created",
             session_id=session.session_id,
-            user_id=session.telegram_user_id
+            user_id=session.user_id
         )
         return session
 
@@ -55,14 +55,14 @@ class MongoSessionStore(BaseSessionStore):
 
     async def get_user_sessions(
         self,
-        telegram_user_id: int,
+        user_id: int,
         project_id: str,
         limit: int = 10
     ) -> List[DevSession]:
         """Get recent sessions for user filtered by project"""
         cursor = self.sessions.find(
             {
-                "telegram_user_id": telegram_user_id,
+                "user_id": user_id,
                 "project_id": project_id
             }
         ).sort("created_at", -1).limit(limit)
@@ -100,10 +100,10 @@ class MongoSessionStore(BaseSessionStore):
         logger.info("project_sessions_deleted", project_id=project_id, count=result.deleted_count)
         return result.deleted_count
 
-    async def get_active_session(self, telegram_user_id: int, project_id: str) -> Optional[DevSession]:
+    async def get_active_session(self, user_id: int, project_id: str) -> Optional[DevSession]:
         """Get user's currently active session for a project"""
         doc = await self.sessions.find_one({
-            "telegram_user_id": telegram_user_id,
+            "user_id": user_id,
             "project_id": project_id,
             "status": {"$in": [
                 SessionStatus.PENDING,
@@ -181,7 +181,7 @@ class MongoProjectStore(BaseProjectStore):
             "project_created",
             project_id=project.project_id,
             name=project.name,
-            user_id=project.telegram_user_id
+            user_id=project.user_id
         )
         return project
 
@@ -196,22 +196,22 @@ class MongoProjectStore(BaseProjectStore):
     async def get_project_by_name(
         self,
         name: str,
-        telegram_user_id: int
+        user_id: int
     ) -> Optional[Project]:
         """Get project by name for specific user"""
         doc = await self.projects.find_one({
             "name": name,
-            "telegram_user_id": telegram_user_id
+            "user_id": user_id
         })
         if doc:
             doc.pop("_id", None)
             return Project(**doc)
         return None
 
-    async def get_user_projects(self, telegram_user_id: int) -> List[Project]:
+    async def get_user_projects(self, user_id: int) -> List[Project]:
         """Get all projects for user"""
         cursor = self.projects.find(
-            {"telegram_user_id": telegram_user_id}
+            {"user_id": user_id}
         ).sort("name", 1)
 
         projects = []

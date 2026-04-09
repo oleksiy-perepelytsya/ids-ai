@@ -25,7 +25,8 @@ IDS uses two complementary storage systems:
 ```python
 DevSession {
     session_id: str
-    telegram_user_id: int
+    user_id: int
+    chat_id: int
     task: str
     context: str  # User guidance accumulated
     
@@ -117,7 +118,7 @@ use ids;
 db.sessions.findOne({session_id: "sess_abc123"});
 
 // Find all sessions for a user
-db.sessions.find({telegram_user_id: 12345})
+db.sessions.find({user_id: 12345})
   .sort({created_at: -1})
   .limit(10);
 
@@ -326,7 +327,7 @@ with open("conversation.json", "w") as f:
 
 **Indexes recommended:**
 ```javascript
-db.sessions.createIndex({telegram_user_id: 1, created_at: -1});
+db.sessions.createIndex({user_id: 1, created_at: -1});
 db.sessions.createIndex({session_id: 1});
 db.sessions.createIndex({status: 1});
 ```

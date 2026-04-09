@@ -1,4 +1,4 @@
-"""File text extraction and chunking for ChromaDB embedding"""
+"""File text extraction and chunking for vector embedding"""
 
 import io
 import re
