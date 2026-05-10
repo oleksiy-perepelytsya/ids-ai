@@ -65,6 +65,11 @@ class Project(BaseModel):
         description="Declared search sources (learning, corpus, graph, …)",
     )
 
+    # MCP context server for the Sourcer agent (optional).
+    # When set, sourcer also queries this MCP SSE endpoint and merges results.
+    mcp_context_url: Optional[str] = Field(default=None, description="MCP SSE endpoint URL for Sourcer context")
+    mcp_tool_name: Optional[str] = Field(default=None, description="MCP tool name to call (None = auto-discover)")
+
     # Deliberation limits (None = use global default from settings)
     max_rounds: Optional[int] = Field(default=None, description="Max deliberation rounds before dead-end")
 

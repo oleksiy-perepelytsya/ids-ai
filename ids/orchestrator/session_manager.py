@@ -341,6 +341,15 @@ class SessionManager:
                 embedding_model=embedding_model,
             )
 
+        # Step 2b: MCP context (if configured on the project)
+        project = await self.project_store.get_project(project_id)
+        if project and project.mcp_context_url:
+            from ids.services.mcp_client import MCPSearchClient
+            mcp = MCPSearchClient(project.mcp_context_url, project.mcp_tool_name)
+            mcp_hits = await mcp.search(search_query)
+            learning_patterns.extend(mcp_hits)
+            logger.info("mcp_context_merged", project_id=project_id, mcp_hits=len(mcp_hits))
+
         # MongoDB: recent consensus session history
         past_sessions = await self.session_store.get_completed_sessions(project_id)
         for session in past_sessions:
