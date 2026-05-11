@@ -342,7 +342,47 @@ class SessionManager:
             search_query = generated_prompt.strip()
             logger.info("genprompt_generated", project_id=project_id, model=genprompt_model, length=len(search_query))
 
-        # Step 2: direct sourcer call — no injected context
+        # Step 2: RAG retrieval using (generated or original) query
+        learning_patterns = []
+        if self.search:
+            learning_patterns = await self.search.search_learning_patterns(
+                project_id=project_id,
+                query=search_query,
+                embedding_model=embedding_model,
+            )
+
+        # Step 2b: MCP context (if configured on the project)
+        project = await self.project_store.get_project(project_id)
+        if project and project.mcp_context_url:
+            from ids.services.mcp_client import MCPSearchClient
+            mcp = MCPSearchClient(project.mcp_context_url, project.mcp_tool_name)
+            mcp_hits = await mcp.search(search_query)
+            learning_patterns.extend(mcp_hits)
+            logger.info("mcp_context_merged", project_id=project_id, mcp_hits=len(mcp_hits))
+
+        # MongoDB: recent consensus session history
+        past_sessions = await self.session_store.get_completed_sessions(project_id)
+        for session in past_sessions:
+            if not session.rounds:
+                continue
+            last_round = session.rounds[-1]
+            summary = (
+                f"Past deliberation: {session.task}\n"
+                f"Conclusion: {last_round.generalist_response.response}"
+            )
+            learning_patterns.append({
+                "content": summary,
+                "metadata": {"type": "past_session", "session_id": session.session_id}
+            })
+
+        logger.info(
+            "sourcer_context_built",
+            project_id=project_id,
+            chroma_patterns=len(learning_patterns) - len(past_sessions),
+            mongo_sessions=len(past_sessions)
+        )
+
+        # Step 3: Sourcer analysis
         response = await sourcer.analyze(
             task=search_query,
             model_override=model,
