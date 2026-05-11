@@ -3,7 +3,7 @@
 from .cross import CrossScore, MergedCross
 from .agent import AgentResponse, ROLE_GENERALIST, ROLE_SOURCER
 from .consensus import DecisionResult, ConsensusThresholds
-from .session import SessionStatus, RoundResult, DevSession, SourcerLog, PromptLibraryEntry
+from .session import SessionStatus, RoundResult, DevSession, SourcerLog, McpCall, PromptLibraryEntry
 from .project import Project
 from .code_task import (
     CodeOperation, CodeTaskType, CodeChange, CodeResult, CodeContext, ClaudeCodeResult
@@ -21,6 +21,7 @@ __all__ = [
     "RoundResult",
     "DevSession",
     "SourcerLog",
+    "McpCall",
     "PromptLibraryEntry",
     "Project",
     "CodeOperation",

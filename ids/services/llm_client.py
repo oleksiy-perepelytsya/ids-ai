@@ -1,8 +1,9 @@
-"""Unified LLM client for Gemini and Claude APIs"""
+"""Unified LLM client for Gemini (Vertex AI) and Claude APIs"""
 
 import asyncio
 import aiohttp
-import google.generativeai as genai
+import vertexai
+from vertexai.generative_models import GenerativeModel, GenerationConfig
 from anthropic import Anthropic
 from ids.config import settings
 from ids.utils import get_logger
@@ -11,21 +12,18 @@ logger = get_logger(__name__)
 
 
 class LLMClient:
-    """Unified client for both Gemini and Claude APIs"""
+    """Unified client for both Gemini (Vertex AI) and Claude APIs"""
 
     def __init__(self):
-        # Configure Gemini
-        genai.configure(api_key=settings.gemini_api_key)
-        # Use configurable model name from settings
-        self.gemini_model = genai.GenerativeModel(settings.gemini_model)
+        # Initialize Vertex AI — picks up GOOGLE_APPLICATION_CREDENTIALS from env
+        vertexai.init(project=settings.gcp_project, location=settings.gcp_location)
+        self.gemini_model_name = settings.gemini_model
 
         # Configure Claude (Anthropic client)
-        self.anthropic = Anthropic(
-            api_key=settings.anthropic_api_key
-        )
+        self.anthropic = Anthropic(api_key=settings.anthropic_api_key)
         self.claude_model = settings.claude_model
 
-        logger.info("llm_client_initialized")
+        logger.info("llm_client_initialized", gcp_project=settings.gcp_project, gcp_location=settings.gcp_location)
 
     async def call_gemini(
         self,
@@ -34,38 +32,24 @@ class LLMClient:
         temperature: float = 0.7,
         max_tokens: int = 2048
     ) -> str:
-        """
-        Call Gemini API.
-
-        Args:
-            prompt: User prompt
-            system_prompt: System instructions
-            temperature: Sampling temperature
-            max_tokens: Maximum output tokens
-
-        Returns:
-            Model response text
-        """
+        """Call Gemini via Vertex AI."""
         try:
-            # Build full prompt with system instructions
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"{system_prompt}\n\n{prompt}"
-
-            # Run blocking call in executor
             loop = asyncio.get_running_loop()
 
             def _call_gemini_sync():
-                return self.gemini_model.generate_content(
-                    full_prompt,
-                    generation_config=genai.types.GenerationConfig(
+                model = GenerativeModel(
+                    self.gemini_model_name,
+                    system_instruction=system_prompt or None,
+                )
+                return model.generate_content(
+                    prompt,
+                    generation_config=GenerationConfig(
                         temperature=temperature,
-                        max_output_tokens=max_tokens
-                    )
+                        max_output_tokens=max_tokens,
+                    ),
                 )
 
             response = await loop.run_in_executor(None, _call_gemini_sync)
-
             logger.info("gemini_call_success")
             return response.text
 

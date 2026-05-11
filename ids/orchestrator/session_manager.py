@@ -240,6 +240,7 @@ class SessionManager:
         self.invalidate_agent_cache(project_id)
 
         sessions_deleted = await self.session_store.delete_project_sessions(project_id)
+        sourcer_logs_deleted = await self.session_store.delete_project_sourcer_logs(project_id)
         project_deleted = await self.project_store.delete_project(project_id)
 
         if self.search:
@@ -249,8 +250,13 @@ class SessionManager:
             "project_fully_deleted",
             project_id=project_id,
             sessions_deleted=sessions_deleted,
+            sourcer_logs_deleted=sourcer_logs_deleted,
         )
-        return {"sessions_deleted": sessions_deleted, "project_deleted": project_deleted}
+        return {
+            "sessions_deleted": sessions_deleted,
+            "sourcer_logs_deleted": sourcer_logs_deleted,
+            "project_deleted": project_deleted,
+        }
 
     async def learn_from_text(self, project_id: str, text: str, embedding_model: str = "minilm") -> None:
         """Directly store text as learning data."""
@@ -296,15 +302,15 @@ class SessionManager:
         project_id: str,
         task: str,
         model: str,
-        embedding_model: str = "minilm",
         genprompt_model: Optional[str] = None,
         user_id: int = 0,
     ) -> tuple[str, Optional[str]]:
         """
-        Run single-agent 'Sourcer' mode with RAG from vector store + MongoDB session history.
+        Run the Sourcer agent: system prompt (from /set_prompts sourcer) + user query only.
+        No RAG, no session history — the sourcer works exclusively with its configured prompt
+        and any external tools (e.g. BaryGraph MCP) that the model itself can invoke.
 
-        If genprompt_model is set, first calls that model to generate an optimised
-        search prompt, then uses the generated prompt for the actual sourcer call.
+        If genprompt_model is set, first rewrites the query via that model before the sourcer call.
 
         Returns:
             (response_text, generated_prompt_or_None)
@@ -314,18 +320,22 @@ class SessionManager:
         if not sourcer:
             raise ValueError("Sourcer agent not initialized for this project")
 
-        # Step 1 (optional): generate an optimised prompt
+        # Step 1 (optional): rewrite the query with an optimised search prompt
         generated_prompt: Optional[str] = None
         search_query = task
         if genprompt_model:
             project = await self.project_store.get_project(project_id)
-            genprompt_system = "You are a search-query optimisation expert. Given a user question and a knowledge base context, rewrite the question into a precise, comprehensive search query that will retrieve the most relevant information. Return only the improved query — no explanation."
+            genprompt_system = (
+                "You are a search-query optimisation expert. "
+                "Rewrite the user question into a precise, comprehensive query. "
+                "Return only the improved query — no explanation."
+            )
             if project and project.genprompt_prompt_url:
                 from ids.services.prompt_loader import fetch_or_fallback
                 genprompt_system = await fetch_or_fallback(project.genprompt_prompt_url, None) or genprompt_system
             generated_prompt = await self.llm_client.call_model(
                 model=genprompt_model,
-                prompt=f"Original question:\n{task}\n\nGenerate an optimised search query for a scientific knowledge base.",
+                prompt=f"Original question:\n{task}\n\nGenerate an optimised query.",
                 system_prompt=genprompt_system,
                 max_tokens=2000,
             )
@@ -375,11 +385,10 @@ class SessionManager:
         # Step 3: Sourcer analysis
         response = await sourcer.analyze(
             task=search_query,
-            learning_patterns=learning_patterns,
-            model_override=model
+            model_override=model,
         )
 
-        # Step 4: Persist log
+        # Step 3: persist log
         log = SourcerLog(
             log_id=f"src_{uuid.uuid4().hex[:12]}",
             project_id=project_id,
@@ -389,6 +398,8 @@ class SessionManager:
             genprompt_model=genprompt_model,
             search_query=search_query,
             sourcer_model=model,
+            system_prompt=sourcer.system_prompt,
+            mcp_calls=[],
             response=response.response,
         )
         await self.session_store.save_sourcer_log(log)

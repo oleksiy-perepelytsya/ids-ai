@@ -140,16 +140,6 @@ class Agent:
             for round_data in previous_rounds_summary:
                 parts.append(self._format_round_summary(round_data))
 
-        parts.append(
-            "\nProvide your analysis in exactly this format:\n\n"
-            "CROSS SCORES:\n"
-            "Confidence: [0-100]\n"
-            "Risk: [0-100]\n"
-            "Outcome: [0-100]\n\n"
-            "RESPONSE:\n"
-            "[Your detailed analysis and recommendation]"
-        )
-
         return "\n".join(parts)
 
     def _build_generalist_prompt(
@@ -188,18 +178,6 @@ class Agent:
                     f"{resp.role_name} [C:{c:.0f}, R:{r:.0f}, O:{o:.0f}]:\n"
                     f"{resp.response}\n"
                 )
-
-        parts.append(
-            "\nSynthesize the specialist perspectives above and provide your consolidated analysis.\n"
-            "Do NOT repeat each specialist's view verbatim — synthesize into a coherent recommendation.\n\n"
-            "Provide your synthesis in exactly this format:\n\n"
-            "CROSS SCORES:\n"
-            "Confidence: [0-100]\n"
-            "Risk: [0-100]\n"
-            "Outcome: [0-100]\n\n"
-            "RESPONSE:\n"
-            "[Your synthesized analysis and recommendation for the user]"
-        )
 
         return "\n".join(parts)
 

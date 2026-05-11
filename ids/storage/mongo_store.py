@@ -164,6 +164,20 @@ class MongoSessionStore(BaseSessionStore):
             result.append(SourcerLog(**doc))
         return result
 
+    async def get_sourcer_log(self, log_id: str) -> Optional[SourcerLog]:
+        """Return a single sourcer log by its log_id."""
+        doc = await self.sourcer_logs.find_one({"log_id": log_id})
+        if doc:
+            doc.pop("_id", None)
+            return SourcerLog(**doc)
+        return None
+
+    async def delete_project_sourcer_logs(self, project_id: str) -> int:
+        """Delete all sourcer logs for a project. Returns count deleted."""
+        result = await self.sourcer_logs.delete_many({"project_id": project_id})
+        logger.info("sourcer_logs_deleted", project_id=project_id, count=result.deleted_count)
+        return result.deleted_count
+
 
 class MongoProjectStore(BaseProjectStore):
     """MongoDB implementation of project storage"""
