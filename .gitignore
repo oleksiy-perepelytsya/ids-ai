@@ -1,3 +1,4 @@
 # Environment files
 .env
 **/__pycache__/
+credentials/

@@ -12,11 +12,14 @@ services:
     container_name: ids-app-dev
     env_file:
       - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/gcloud/application_default_credentials.json
     volumes:
       # Mount code for live development
       - ./ids:/app/ids
       - ./tests:/app/tests
       - ${PROJECTS_ROOT:-./projects}:/projects
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/run/gcloud/application_default_credentials.json:ro
     depends_on:
       - mongodb
       - qdrant

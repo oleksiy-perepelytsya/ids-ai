@@ -22,12 +22,15 @@ class Settings(BaseSettings):
     allowed_telegram_users: Optional[str] = Field(default=None, description="(deprecated) use ALLOWED_USERS instead")
 
     # LLM API Keys
-    gemini_api_key: str = Field(..., description="Google Gemini API key")
     anthropic_api_key: str = Field(..., description="Anthropic Claude API key")
     openai_api_key: Optional[str] = Field(default=None, description="OpenAI API key (required for ada-002 embeddings)")
 
+    # Vertex AI (Gemini)
+    gcp_project: str = Field(default="barygraph-494511", description="GCP project ID for Vertex AI")
+    gcp_location: str = Field(default="europe-central2", description="Vertex AI region")
+
     # LLM Model Configuration
-    gemini_model: str = Field(default="gemini-2.0-flash", description="Gemini model name")
+    gemini_model: str = Field(default="gemini-2.5-pro", description="Gemini model name (Vertex AI)")
     claude_model: str = Field(default="claude-sonnet-4-20250514", description="Claude model name")
     local_llm_url: str = Field(default="http://localhost:8080", description="Local llama-server base URL")
 

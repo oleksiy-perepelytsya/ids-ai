@@ -9,6 +9,18 @@ from .cross import MergedCross
 from .consensus import DecisionResult
 
 
+class McpCall(BaseModel):
+    """A single MCP tool invocation and its result."""
+    tool_name: str
+    arguments: dict = Field(default_factory=dict)
+    result: Optional[str] = None
+    error: Optional[str] = None
+    called_at: datetime = Field(default_factory=datetime.utcnow)
+
+    class Config:
+        json_encoders = {datetime: lambda v: v.isoformat()}
+
+
 class SourcerLog(BaseModel):
     """Record of a single /sourcer invocation"""
     log_id: str = Field(description="Unique log identifier")
@@ -19,6 +31,8 @@ class SourcerLog(BaseModel):
     genprompt_model: Optional[str] = Field(default=None, description="Model used for prompt generation")
     search_query: str = Field(description="Query actually sent to sourcer (original or generated)")
     sourcer_model: str = Field(description="Model used for the sourcer call")
+    system_prompt: str = Field(default="", description="Exact system prompt sent to the sourcer model")
+    mcp_calls: List[McpCall] = Field(default_factory=list, description="MCP tool invocations made during the call")
     response: str = Field(description="Sourcer response text")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 

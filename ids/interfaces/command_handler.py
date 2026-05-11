@@ -965,7 +965,6 @@ class CommandHandler:
             response, generated_prompt = await self.session_manager.run_sourcer(
                 project_id=project.project_id,
                 task=query,
-                embedding_model=project.embedding_model,
                 model=model_choice,
                 genprompt_model=genprompt_model,
                 user_id=user_id,

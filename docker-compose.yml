@@ -4,8 +4,11 @@ services:
     container_name: ids-app
     env_file:
       - .env
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/gcloud/application_default_credentials.json
     volumes:
       - ${PROJECTS_ROOT:-./projects}:/projects
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/run/gcloud/application_default_credentials.json:ro
     depends_on:
       - mongodb
       - qdrant
