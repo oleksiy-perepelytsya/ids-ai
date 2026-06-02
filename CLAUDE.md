@@ -96,9 +96,9 @@ Callers (RoundExecutor, SessionManager, HostessContext)
 ### Agent Roles
 
 Defined by persona files in `ids/agents/personas/` (markdown with `# Role:` and `# System Prompt`):
-- **Generalist** (Claude) — Facilitator, frames problems, does NOT propose solutions
-- **Specialists** (Gemini) — Progressive/Critic pairs for Dev, Architect, SRE
-- **Sourcer** (Gemini) — Knowledge base search
+- **Generalist** (Claude) — Facilitator, frames problems, does not proppse solutions
+- **Specialists** (Gemini) — Various specialist setups including generic prompts
+- **Sourcer** (Gemini) — Knowledge base search, single answering agent
 - **Hostess** (Gemini) — App assistant, helps users navigate IDS
 
 ## Code Conventions
